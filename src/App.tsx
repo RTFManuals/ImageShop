@@ -176,6 +176,7 @@ export default function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[] | null>(null);
   const selectionPathRef = useRef<{ x: number; y: number }[] | null>(null);
+  const [selectionContour, setSelectionContour] = useState<{ x: number; y: number }[] | null>(null);
   const [pixelColor, setPixelColor] = useState('#ffffff');
 
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -257,26 +258,35 @@ export default function App() {
     // Selection marching ants
     if (selection) {
       const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+      const contour = selectionContour;
       
-      if (mask) {
-        // Draw selection mask as semi-transparent overlay
-        ctx.globalAlpha = 0.3;
-        ctx.drawImage(mask, 0, 0);
-        ctx.globalAlpha = 1;
+      if (mask && contour && contour.length > 0) {
+        // Draw marching ants along the contour
+        const time = Math.floor(Date.now() / 100);
+        const dotSize = 1;
+        const patternLength = 8; // 4 black + 4 white
+        
+        contour.forEach((point, index) => {
+          const patternPos = (index + time) % patternLength;
+          const isBlack = patternPos < 4;
+          
+          ctx.fillStyle = isBlack ? '#000000' : '#ffffff';
+          ctx.fillRect(point.x, point.y, dotSize, dotSize);
+        });
+      } else if (selection) {
+        // Fallback: draw marching ants on bounding box if no contour
+        const time = Date.now() / 100;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.lineDashOffset = time % 8;
+        ctx.strokeRect(selection.x + 0.5, selection.y + 0.5, selection.w, selection.h);
+        ctx.strokeStyle = '#fff';
+        ctx.lineDashOffset = (time + 4) % 8;
+        ctx.strokeRect(selection.x + 0.5, selection.y + 0.5, selection.w, selection.h);
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
       }
-      
-      // Draw marching ants on bounding box
-      const time = Date.now() / 100;
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.lineDashOffset = time % 8;
-      ctx.strokeRect(selection.x + 0.5, selection.y + 0.5, selection.w, selection.h);
-      ctx.strokeStyle = '#fff';
-      ctx.lineDashOffset = (time + 4) % 8;
-      ctx.strokeRect(selection.x + 0.5, selection.y + 0.5, selection.w, selection.h);
-      ctx.setLineDash([]);
-      ctx.lineDashOffset = 0;
     }
 
     // Transform handles
@@ -305,7 +315,7 @@ export default function App() {
 
     // Update navigator
     updateNavigator();
-  }, [layers, canvasWidth, canvasHeight, selection, transform]);
+  }, [layers, canvasWidth, canvasHeight, selection, transform, selectionContour]);
 
   const updateNavigator = () => {
     const navCanvas = navigatorCanvasRef.current;
@@ -565,6 +575,47 @@ export default function App() {
     ctx.globalAlpha = 1;
   };
 
+  const extractContourFromMask = (maskCanvas: HTMLCanvasElement): { x: number; y: number }[] => {
+    const maskCtx = maskCanvas.getContext('2d')!;
+    const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = maskData.data;
+    const contour: { x: number; y: number }[] = [];
+    
+    // Find edge pixels (pixels that are selected but have at least one unselected neighbor)
+    for (let y = 0; y < canvasHeight; y++) {
+      for (let x = 0; x < canvasWidth; x++) {
+        const idx = (y * canvasWidth + x) * 4;
+        const isSelected = data[idx + 3] > 0;
+        
+        if (!isSelected) continue;
+        
+        // Check if this is an edge pixel
+        let isEdge = false;
+        
+        // Check 4-connected neighbors
+        if (x === 0 || x === canvasWidth - 1 || y === 0 || y === canvasHeight - 1) {
+          isEdge = true;
+        } else {
+          const topIdx = ((y - 1) * canvasWidth + x) * 4;
+          const bottomIdx = ((y + 1) * canvasWidth + x) * 4;
+          const leftIdx = (y * canvasWidth + (x - 1)) * 4;
+          const rightIdx = (y * canvasWidth + (x + 1)) * 4;
+          
+          if (data[topIdx + 3] === 0 || data[bottomIdx + 3] === 0 || 
+              data[leftIdx + 3] === 0 || data[rightIdx + 3] === 0) {
+            isEdge = true;
+          }
+        }
+        
+        if (isEdge) {
+          contour.push({ x, y });
+        }
+      }
+    }
+    
+    return contour;
+  };
+
   const magicWandSelect = (startX: number, startY: number) => {
     // Use active layer instead of composite
     const activeLayer = getActiveLayer();
@@ -641,16 +692,20 @@ export default function App() {
         maskData.data[i * 4] = 255;     // R
         maskData.data[i * 4 + 1] = 255; // G
         maskData.data[i * 4 + 2] = 255; // B
-        maskData.data[i * 4 + 3] = 128; // A (semi-transparent for visualization)
+        maskData.data[i * 4 + 3] = 255; // A (fully opaque for mask)
       }
     }
     
     maskCtx.putImageData(maskData, 0, 0);
     
+    // Extract contour from mask
+    const contour = extractContourFromMask(maskCanvas);
+    setSelectionContour(contour);
+    
     // Store selection mask globally for later use
     (window as any).__selectionMask = maskCanvas;
     
-    // Set bounding box for now (real mask is stored separately)
+    // Set bounding box for reference
     setSelection({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
     renderComposite();
   };
@@ -710,6 +765,7 @@ export default function App() {
         setIsDrawing(true);
         setSelectionStart(pos);
         setSelection(null);
+        setSelectionContour(null);
         (window as any).__selectionMask = null;
         break;
       case 'lasso':
@@ -717,6 +773,7 @@ export default function App() {
         setSelectionPath([pos]);
         selectionPathRef.current = [pos];
         setSelection(null);
+        setSelectionContour(null);
         (window as any).__selectionMask = null;
         break;
       case 'text':
@@ -1610,11 +1667,13 @@ export default function App() {
 
   const selectAll = () => { 
     setSelection({ x: 0, y: 0, w: canvasWidth, h: canvasHeight }); 
+    setSelectionContour(null);
     (window as any).__selectionMask = null;
     renderComposite(); 
   };
   const deselectAll = () => { 
     setSelection(null); 
+    setSelectionContour(null);
     (window as any).__selectionMask = null;
     renderComposite(); 
   };
