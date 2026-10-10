@@ -434,6 +434,22 @@ export default function App() {
     renderComposite();
   }, [renderComposite]);
 
+  // Check cursor overlay initialization
+  useEffect(() => {
+    const overlay = cursorOverlayRef.current;
+    if (overlay) {
+      console.log('✅ Cursor overlay инициализирован:', {
+        width: overlay.width,
+        height: overlay.height,
+        clientWidth: overlay.clientWidth,
+        clientHeight: overlay.clientHeight,
+        zIndex: overlay.style.zIndex
+      });
+    } else {
+      console.log('⚠️ Cursor overlay не инициализирован');
+    }
+  }, []);
+
   const pushHistory = (currentLayers: Layer[], currentActiveId: string) => {
     const state = saveHistoryState(currentLayers, currentActiveId);
     setHistory(prev => {
@@ -1026,6 +1042,7 @@ export default function App() {
     const overlay = cursorOverlayRef.current;
     if (!overlay) return;
     const ctx = overlay.getContext('2d')!;
+    
     // Don't clear if we're drawing shapes or selection (they handle their own overlay)
     if (!isDrawing || !['line', 'rectangle', 'ellipse', 'gradient', 'lasso', 'select'].includes(tool)) {
       ctx.clearRect(0, 0, overlay.width, overlay.height);
@@ -2091,7 +2108,7 @@ export default function App() {
                   width={canvasWidth}
                   height={canvasHeight}
                   className="absolute top-0 left-0 pointer-events-none"
-                  style={{ width: canvasWidth, height: canvasHeight }}
+                  style={{ width: canvasWidth, height: canvasHeight, zIndex: 10 }}
                 />
               </div>
             </div>
