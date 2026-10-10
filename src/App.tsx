@@ -1691,16 +1691,64 @@ export default function App() {
     const activeLayer = getActiveLayer();
     if (!activeLayer) return;
     const ctx = activeLayer.canvas.getContext('2d')!;
-    const imageData = ctx.getImageData(selection.x, selection.y, selection.w, selection.h);
+    const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+    
+    console.log('📋 copySelection вызвана');
+    console.log('  Selection:', selection);
+    console.log('  Есть маска:', !!mask);
+    
+    // Create canvas with bounding box size
     const tempCanvas = createCanvas(selection.w, selection.h);
-    tempCanvas.getContext('2d')!.putImageData(imageData, 0, 0);
+    const tempCtx = tempCanvas.getContext('2d')!;
+    
+    if (mask) {
+      // Copy only pixels inside the selection mask
+      const layerData = ctx.getImageData(selection.x, selection.y, selection.w, selection.h);
+      const maskData = mask.getContext('2d')!.getImageData(selection.x, selection.y, selection.w, selection.h);
+      
+      let opaquePixels = 0;
+      let transparentPixels = 0;
+      
+      // Apply mask: keep only pixels where mask is opaque
+      for (let i = 0; i < layerData.data.length; i += 4) {
+        const maskAlpha = maskData.data[i + 3];
+        if (maskAlpha === 0) {
+          // Outside selection - make transparent
+          layerData.data[i + 3] = 0;
+          transparentPixels++;
+        } else {
+          // Inside selection - keep original pixel
+          opaquePixels++;
+        }
+      }
+      
+      console.log(`  Непрозрачных пикселей: ${opaquePixels}`);
+      console.log(`  Прозрачных пикселей: ${transparentPixels}`);
+      
+      tempCtx.putImageData(layerData, 0, 0);
+    } else {
+      // No mask - copy entire bounding box (rectangular selection)
+      console.log('  Копирование прямоугольной области (без маски)');
+      const imageData = ctx.getImageData(selection.x, selection.y, selection.w, selection.h);
+      tempCtx.putImageData(imageData, 0, 0);
+    }
+    
     // Store in a global for paste
     (window as any).__clipboard = { canvas: tempCanvas, x: selection.x, y: selection.y };
+    console.log('  ✅ Скопировано в буфер обмена');
   };
 
   const pasteClipboard = () => {
     const clip = (window as any).__clipboard;
-    if (!clip) return;
+    if (!clip) {
+      console.log('📋 pasteClipboard: буфер обмена пуст');
+      return;
+    }
+    
+    console.log('📋 pasteClipboard вызвана');
+    console.log('  Позиция вставки:', clip.x, clip.y);
+    console.log('  Размер canvas:', clip.canvas.width, 'x', clip.canvas.height);
+    
     const newLayer: Layer = {
       id: generateId(), name: 'Pasted Layer', visible: true, opacity: 100,
       canvas: createCanvas(canvasWidth, canvasHeight), blendMode: 'normal', locked: false,
@@ -1710,6 +1758,7 @@ export default function App() {
     setLayers(newLayers);
     setActiveLayerId(newLayer.id);
     pushHistory(newLayers, newLayer.id);
+    console.log('  ✅ Вставлено в новый слой');
   };
 
   // Text
