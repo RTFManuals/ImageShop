@@ -175,6 +175,7 @@ export default function App() {
   const [shapeFill, setShapeFill] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[] | null>(null);
+  const selectionPathRef = useRef<{ x: number; y: number }[] | null>(null);
   const [pixelColor, setPixelColor] = useState('#ffffff');
 
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -620,12 +621,14 @@ export default function App() {
         magicWandSelect(pos.x, pos.y);
         break;
       case 'select':
+        setIsDrawing(true);
         setSelectionStart(pos);
         setSelection(null);
         break;
       case 'lasso':
         setIsDrawing(true);
         setSelectionPath([pos]);
+        selectionPathRef.current = [pos];
         setSelection(null);
         break;
       case 'text':
@@ -762,29 +765,51 @@ export default function App() {
         break;
       case 'select':
         if (selectionStart) {
-          setSelection({
+          const sel = {
             x: Math.min(selectionStart.x, pos.x),
             y: Math.min(selectionStart.y, pos.y),
             w: Math.abs(pos.x - selectionStart.x),
             h: Math.abs(pos.y - selectionStart.y),
-          });
+          };
+          setSelection(sel);
+          // Draw preview on overlay
+          const overlay = cursorOverlayRef.current;
+          if (overlay) {
+            const octx = overlay.getContext('2d')!;
+            octx.clearRect(0, 0, overlay.width, overlay.height);
+            octx.strokeStyle = '#fff';
+            octx.lineWidth = 1;
+            octx.setLineDash([4, 4]);
+            octx.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w, sel.h);
+            octx.strokeStyle = '#000';
+            octx.lineDashOffset = 4;
+            octx.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w, sel.h);
+            octx.setLineDash([]);
+            octx.lineDashOffset = 0;
+            // Show dimensions
+            octx.fillStyle = '#4a90d9';
+            octx.font = '10px sans-serif';
+            octx.fillText(`${sel.w} × ${sel.h}`, pos.x + 10, pos.y - 5);
+          }
           renderComposite();
         }
         break;
       case 'lasso':
-        if (selectionPath) {
-          setSelectionPath(prev => prev ? [...prev, pos] : [pos]);
+        if (selectionPathRef.current) {
+          const newPath = [...selectionPathRef.current, pos];
+          selectionPathRef.current = newPath;
+          setSelectionPath(newPath);
           // Draw lasso path on overlay
           const overlay = cursorOverlayRef.current;
-          if (overlay && selectionPath.length > 0) {
+          if (overlay && newPath.length > 0) {
             const octx = overlay.getContext('2d')!;
             octx.clearRect(0, 0, overlay.width, overlay.height);
             octx.strokeStyle = '#fff';
             octx.lineWidth = 1;
             octx.setLineDash([3, 3]);
             octx.beginPath();
-            octx.moveTo(selectionPath[0].x, selectionPath[0].y);
-            selectionPath.forEach(p => octx.lineTo(p.x, p.y));
+            octx.moveTo(newPath[0].x, newPath[0].y);
+            newPath.forEach(p => octx.lineTo(p.x, p.y));
             octx.lineTo(pos.x, pos.y);
             octx.stroke();
             octx.setLineDash([]);
@@ -856,11 +881,12 @@ export default function App() {
     const overlay = cursorOverlayRef.current;
     if (!overlay) return;
     const ctx = overlay.getContext('2d')!;
-    // Don't clear if we're drawing shapes (they handle their own overlay)
-    if (!isDrawing || !['line', 'rectangle', 'ellipse', 'gradient', 'lasso'].includes(tool)) {
+    // Don't clear if we're drawing shapes or selection (they handle their own overlay)
+    if (!isDrawing || !['line', 'rectangle', 'ellipse', 'gradient', 'lasso', 'select'].includes(tool)) {
       ctx.clearRect(0, 0, overlay.width, overlay.height);
     }
-    if (['brush', 'eraser', 'blur-tool', 'sharpen-tool', 'dodge', 'burn', 'smudge', 'clone'].includes(tool)) {
+    // Draw brush circle for brush-like tools
+    if (['brush', 'eraser', 'blur-tool', 'sharpen-tool', 'dodge', 'burn', 'smudge', 'clone'].includes(tool) && !isDrawing) {
       ctx.strokeStyle = 'rgba(255,255,255,0.8)';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -958,14 +984,15 @@ export default function App() {
       renderComposite();
     }
 
-    if (tool === 'lasso' && selectionPath && selectionPath.length > 2) {
+    if (tool === 'lasso' && selectionPathRef.current && selectionPathRef.current.length > 2) {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      selectionPath.forEach(p => {
+      selectionPathRef.current.forEach(p => {
         minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
         minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
       });
       setSelection({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
       setSelectionPath(null);
+      selectionPathRef.current = null;
       renderComposite();
     }
 
@@ -974,10 +1001,14 @@ export default function App() {
     setGradientStart(null);
     setSelectionStart(null);
     setSelectionPath(null);
-    // Clear overlay
+    selectionPathRef.current = null;
+    // Clear overlay (but keep selection visible via renderComposite)
     const overlay = cursorOverlayRef.current;
     if (overlay) overlay.getContext('2d')!.clearRect(0, 0, overlay.width, overlay.height);
-    pushHistory(layers, activeLayerId);
+    // Only push history for tools that modify the canvas
+    if (['brush', 'eraser', 'fill', 'blur-tool', 'sharpen-tool', 'dodge', 'burn', 'smudge', 'clone', 'line', 'rectangle', 'ellipse', 'gradient', 'move'].includes(tool)) {
+      pushHistory(layers, activeLayerId);
+    }
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -1484,7 +1515,7 @@ export default function App() {
     { id: 'zoom', label: 'Zoom Tool', shortcut: 'Z', group: 'E' },
   ];
 
-  const rulerSize = showRulers ? 20 : 0;
+
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#535353] text-gray-200 overflow-hidden select-none" style={{ fontFamily: "'Segoe UI', Tahoma, sans-serif", fontSize: '11px' }}>
@@ -1671,20 +1702,24 @@ export default function App() {
         </div>
 
         {/* Canvas Area with Rulers */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex flex-1 overflow-hidden">
-            {/* Top ruler */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left column: corner + left ruler */}
+          <div className="flex flex-col">
+            {/* Top-left corner */}
+            {showRulers && <div className="w-[20px] h-[20px] bg-[#444] border-r border-b border-[#222]"></div>}
+            {/* Left ruler */}
             {showRulers && (
-              <div className="h-[20px] bg-[#444] border-b border-[#222] relative overflow-hidden" style={{ marginLeft: rulerSize }}>
-                <canvas ref={topRulerRef} className="w-full h-full" />
+              <div className="w-[20px] flex-1 bg-[#444] border-r border-[#222] relative overflow-hidden">
+                <canvas ref={leftRulerRef} className="w-full h-full" />
               </div>
             )}
           </div>
-          <div className="flex flex-1 overflow-hidden">
-            {/* Left ruler */}
+          {/* Right column: top ruler + canvas */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Top ruler */}
             {showRulers && (
-              <div className="w-[20px] bg-[#444] border-r border-[#222] relative overflow-hidden">
-                <canvas ref={leftRulerRef} className="w-full h-full" />
+              <div className="h-[20px] bg-[#444] border-b border-[#222] relative overflow-hidden">
+                <canvas ref={topRulerRef} className="w-full h-full" />
               </div>
             )}
             {/* Canvas container */}
