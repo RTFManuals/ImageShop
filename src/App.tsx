@@ -112,7 +112,11 @@ function rgbaToHex(r: number, g: number, b: number): string {
 const ToolIcons: Record<string, React.ReactNode> = {
   move: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3 3h-2v5h5v-2l3 3-3 3v-2h-5v5h2l-3 3-3-3h2v-5H5v2l-3-3 3-3v2h5V5H8l3-3z"/></svg>,
   select: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3 2"><rect x="3" y="3" width="18" height="18" rx="1"/></svg>,
+  'ellipse-select': <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3 2"><ellipse cx="12" cy="12" rx="9" ry="7"/></svg>,
   lasso: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12c0-5 4-9 9-9s7 3 7 6-2 5-5 5-4-2-4-4 1-3 3-3 3 1 3 3"/><circle cx="8" cy="19" r="2"/></svg>,
+  'polygonal-lasso': <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12l4-7 6 2 4 6-3 6-7 1z"/><circle cx="3" cy="12" r="1.5" fill="currentColor"/><circle cx="7" cy="5" r="1.5" fill="currentColor"/><circle cx="13" cy="7" r="1.5" fill="currentColor"/><circle cx="17" cy="13" r="1.5" fill="currentColor"/><circle cx="14" cy="19" r="1.5" fill="currentColor"/><circle cx="7" cy="20" r="1.5" fill="currentColor"/></svg>,
+  'quick-selection': <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2 4 4 2-4 2-2 4-2-4-4-2 4-2z" strokeDasharray="2 1"/><circle cx="12" cy="12" r="3"/></svg>,
+  'healing-brush': <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 2l4 4-12 12H6v-4z"/><path d="M6 18c-2 0-4 2-4 4 2 0 4-2 4-4z"/><circle cx="14" cy="10" r="2" fill="currentColor" opacity="0.5"/></svg>,
   'magic-wand': <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 21L15 9"/><path d="M14 4l2 2-2 2-2-2z"/><path d="M20 4v2M20 10v2M18 6h2M22 6h-2M17 1l1 1M21 1l-1 1M17 11l1-1M21 11l-1-1"/></svg>,
   crop: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2v16h16M2 6h16v16"/></svg>,
   eyedropper: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 22l1-5L17 3l4 4L7 21z"/><path d="M14 6l4 4"/></svg>,
@@ -158,6 +162,12 @@ export default function App() {
   const [showTextDialog, setShowTextDialog] = useState(false);
   const [showNavigator, setShowNavigator] = useState(true);
   const [showRulers, setShowRulers] = useState(true);
+  const [showLevelsDialog, setShowLevelsDialog] = useState(false);
+  const [showExposureDialog, setShowExposureDialog] = useState(false);
+  const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
+  const [layerGroups, setLayerGroups] = useState<{ id: string; name: string; visible: boolean; opacity: number; layerIds: string[]; expanded: boolean }[]>([]);
+  const [showBeforeAfter, setShowBeforeAfter] = useState(false);
+  const [beforeSnapshot, setBeforeSnapshot] = useState<ImageData | null>(null);
   const [textOptions, setTextOptions] = useState({ text: '', font: 'Arial', size: 32, color: '#000000', bold: false, italic: false, align: 'left' as CanvasTextAlign });
   const [textPosition, setTextPosition] = useState({ x: 0, y: 0 });
   const [selection, setSelection] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -207,6 +217,56 @@ export default function App() {
     const state = saveHistoryState([initialLayer], initialLayer.id);
     setHistory([state]);
     setHistoryIndex(0);
+  }, []);
+
+  // Drag & Drop support
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+
+      const file = files[0];
+      if (!file.type.startsWith('image/')) return;
+
+      const img = new Image();
+      img.onload = () => {
+        setCanvasWidth(img.width);
+        setCanvasHeight(img.height);
+        const layer: Layer = {
+          id: generateId(), name: file.name, visible: true, opacity: 100,
+          canvas: createCanvas(img.width, img.height), blendMode: 'normal', locked: false,
+        };
+        layer.canvas.getContext('2d')!.drawImage(img, 0, 0);
+        setLayers([layer]);
+        setActiveLayerId(layer.id);
+        setHistory([]);
+        setHistoryIndex(-1);
+        setTimeout(() => {
+          const state = saveHistoryState([layer], layer.id);
+          setHistory([state]);
+          setHistoryIndex(0);
+        }, 0);
+      };
+      img.src = URL.createObjectURL(file);
+    };
+
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('dragover', handleDragOver);
+      container.addEventListener('drop', handleDrop);
+      return () => {
+        container.removeEventListener('dragover', handleDragOver);
+        container.removeEventListener('drop', handleDrop);
+      };
+    }
   }, []);
 
   // Render composite
@@ -816,6 +876,29 @@ export default function App() {
         setSelectionContour(null);
         (window as any).__selectionMask = null;
         break;
+      case 'ellipse-select':
+        setIsDrawing(true);
+        setSelectionStart(pos);
+        setSelection(null);
+        setSelectionContour(null);
+        (window as any).__selectionMask = null;
+        break;
+      case 'polygonal-lasso':
+        if (!selectionPathRef.current) {
+          // Start new polygon
+          setIsDrawing(true);
+          setSelectionPath([pos]);
+          selectionPathRef.current = [pos];
+          setSelection(null);
+          setSelectionContour(null);
+          (window as any).__selectionMask = null;
+        } else {
+          // Add point to polygon
+          const newPath = [...selectionPathRef.current, pos];
+          selectionPathRef.current = newPath;
+          setSelectionPath(newPath);
+        }
+        break;
       case 'lasso':
         setIsDrawing(true);
         setSelectionPath([pos]);
@@ -851,6 +934,19 @@ export default function App() {
         setIsDrawing(true);
         setLastPos(pos);
         applyBlurSharpen(ctx, pos, tool === 'blur-tool');
+        renderComposite();
+        break;
+      case 'healing-brush':
+        setIsDrawing(true);
+        setLastPos(pos);
+        applyHealingBrush(ctx, pos);
+        renderComposite();
+        break;
+      case 'quick-selection':
+        setIsDrawing(true);
+        setLastPos(pos);
+        // Quick selection: expand selection based on color similarity
+        quickSelectionExpand(pos.x, pos.y);
         renderComposite();
         break;
       case 'dodge':
@@ -994,6 +1090,69 @@ export default function App() {
           renderComposite();
         }
         break;
+      case 'ellipse-select':
+        if (selectionStart) {
+          const sel = {
+            x: Math.min(selectionStart.x, pos.x),
+            y: Math.min(selectionStart.y, pos.y),
+            w: Math.abs(pos.x - selectionStart.x),
+            h: Math.abs(pos.y - selectionStart.y),
+          };
+          setSelection(sel);
+          // Draw ellipse preview on overlay
+          const overlay = cursorOverlayRef.current;
+          if (overlay) {
+            const octx = overlay.getContext('2d')!;
+            octx.clearRect(0, 0, overlay.width, overlay.height);
+            const cx = sel.x + sel.w / 2;
+            const cy = sel.y + sel.h / 2;
+            const rx = sel.w / 2;
+            const ry = sel.h / 2;
+            octx.strokeStyle = '#fff';
+            octx.lineWidth = 1;
+            octx.setLineDash([4, 4]);
+            octx.beginPath();
+            octx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+            octx.stroke();
+            octx.strokeStyle = '#000';
+            octx.lineDashOffset = 4;
+            octx.beginPath();
+            octx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+            octx.stroke();
+            octx.setLineDash([]);
+            octx.lineDashOffset = 0;
+            // Show dimensions
+            octx.fillStyle = '#4a90d9';
+            octx.font = '10px sans-serif';
+            octx.fillText(`${Math.round(sel.w)} × ${Math.round(sel.h)}`, pos.x + 10, pos.y - 5);
+          }
+          renderComposite();
+        }
+        break;
+      case 'polygonal-lasso':
+        if (selectionPathRef.current && selectionPathRef.current.length > 0) {
+          // Draw polygon preview on overlay
+          const overlay = cursorOverlayRef.current;
+          if (overlay) {
+            const octx = overlay.getContext('2d')!;
+            octx.clearRect(0, 0, overlay.width, overlay.height);
+            octx.strokeStyle = '#fff';
+            octx.lineWidth = 1;
+            octx.setLineDash([3, 3]);
+            octx.beginPath();
+            octx.moveTo(selectionPathRef.current[0].x, selectionPathRef.current[0].y);
+            selectionPathRef.current.forEach(p => octx.lineTo(p.x, p.y));
+            octx.lineTo(pos.x, pos.y);
+            octx.stroke();
+            octx.setLineDash([]);
+            // Draw points
+            selectionPathRef.current.forEach(p => {
+              octx.fillStyle = '#fff';
+              octx.fillRect(p.x - 2, p.y - 2, 4, 4);
+            });
+          }
+        }
+        break;
       case 'lasso':
         if (selectionPathRef.current) {
           const newPath = [...selectionPathRef.current, pos];
@@ -1057,6 +1216,16 @@ export default function App() {
       case 'blur-tool':
       case 'sharpen-tool':
         applyBlurSharpen(ctx, pos, tool === 'blur-tool');
+        setLastPos(pos);
+        renderComposite();
+        break;
+      case 'healing-brush':
+        applyHealingBrush(ctx, pos);
+        setLastPos(pos);
+        renderComposite();
+        break;
+      case 'quick-selection':
+        quickSelectionExpand(pos.x, pos.y);
         setLastPos(pos);
         renderComposite();
         break;
@@ -1278,6 +1447,46 @@ export default function App() {
       renderComposite();
     }
 
+    if (tool === 'ellipse-select' && selectionStart && selection) {
+      // Create elliptical selection mask
+      const sel = selection;
+      const maskCanvas = createCanvas(canvasWidth, canvasHeight);
+      const maskCtx = maskCanvas.getContext('2d')!;
+      const maskData = maskCtx.createImageData(canvasWidth, canvasHeight);
+      
+      const cx = sel.x + sel.w / 2;
+      const cy = sel.y + sel.h / 2;
+      const rx = sel.w / 2;
+      const ry = sel.h / 2;
+      
+      // Check each pixel in bounding box
+      for (let y = sel.y; y <= sel.y + sel.h; y++) {
+        for (let x = sel.x; x <= sel.x + sel.w; x++) {
+          // Ellipse equation: ((x-cx)/rx)^2 + ((y-cy)/ry)^2 <= 1
+          const dx = (x - cx) / rx;
+          const dy = (y - cy) / ry;
+          if (dx * dx + dy * dy <= 1) {
+            const idx = (y * canvasWidth + x) * 4;
+            maskData.data[idx] = 255;     // R
+            maskData.data[idx + 1] = 255; // G
+            maskData.data[idx + 2] = 255; // B
+            maskData.data[idx + 3] = 255; // A
+          }
+        }
+      }
+      
+      maskCtx.putImageData(maskData, 0, 0);
+      
+      // Extract contour from mask
+      const contour = extractContourFromMask(maskCanvas);
+      setSelectionContour(contour);
+      
+      // Store selection mask globally
+      (window as any).__selectionMask = maskCanvas;
+      
+      renderComposite();
+    }
+
     if (tool === 'crop' && isCropping && cropRect && cropRect.w > 0 && cropRect.h > 0) {
       setIsDrawing(false);
       // Keep crop rect visible for confirmation
@@ -1467,6 +1676,200 @@ export default function App() {
     pushHistory([flatLayer], flatLayer.id);
   };
 
+  const createLayerGroup = () => {
+    const selectedLayers = layers.filter(l => l.id === activeLayerId);
+    if (selectedLayers.length === 0) return;
+    
+    const groupId = generateId();
+    const newGroup = {
+      id: groupId,
+      name: `Group ${layerGroups.length + 1}`,
+      visible: true,
+      opacity: 100,
+      layerIds: [activeLayerId],
+      expanded: true,
+    };
+    
+    setLayerGroups([...layerGroups, newGroup]);
+    setLayers(prev => prev.map(l => l.id === activeLayerId ? { ...l, groupId } : l));
+  };
+
+  const toggleClippingMask = () => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    
+    const idx = layers.findIndex(l => l.id === activeLayerId);
+    if (idx <= 0) return; // Need a layer below to clip to
+    
+    setLayers(prev => prev.map(l => 
+      l.id === activeLayerId ? { ...l, clippingMask: !l.clippingMask } : l
+    ));
+    renderComposite();
+    pushHistory(layers, activeLayerId);
+  };
+
+  const applyHealingBrush = (ctx: CanvasRenderingContext2D, pos: { x: number; y: number }) => {
+    const radius = Math.floor(brushSize / 2);
+    const x = Math.max(0, pos.x - radius);
+    const y = Math.max(0, pos.y - radius);
+    const w = Math.min(brushSize * 2, ctx.canvas.width - x);
+    const h = Math.min(brushSize * 2, ctx.canvas.height - y);
+    
+    if (w <= 0 || h <= 0) return;
+    
+    const imageData = ctx.getImageData(x, y, w, h);
+    const data = imageData.data;
+    
+    // Simple healing: blend with surrounding pixels
+    const copy = new Uint8ClampedArray(data);
+    
+    for (let py = 1; py < h - 1; py++) {
+      for (let px = 1; px < w - 1; px++) {
+        const dist = Math.sqrt(Math.pow(px - radius, 2) + Math.pow(py - radius, 2));
+        if (dist > radius) continue;
+        
+        const factor = 1 - dist / radius;
+        
+        // Average of surrounding pixels
+        let avgR = 0, avgG = 0, avgB = 0, count = 0;
+        for (let ky = -2; ky <= 2; ky++) {
+          for (let kx = -2; kx <= 2; kx++) {
+            if (kx === 0 && ky === 0) continue;
+            const nx = px + kx;
+            const ny = py + ky;
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+              const idx = (ny * w + nx) * 4;
+              avgR += copy[idx];
+              avgG += copy[idx + 1];
+              avgB += copy[idx + 2];
+              count++;
+            }
+          }
+        }
+        
+        if (count > 0) {
+          const idx = (py * w + px) * 4;
+          data[idx] = Math.round(copy[idx] * (1 - factor * 0.7) + (avgR / count) * factor * 0.7);
+          data[idx + 1] = Math.round(copy[idx + 1] * (1 - factor * 0.7) + (avgG / count) * factor * 0.7);
+          data[idx + 2] = Math.round(copy[idx + 2] * (1 - factor * 0.7) + (avgB / count) * factor * 0.7);
+        }
+      }
+    }
+    
+    ctx.putImageData(imageData, x, y);
+  };
+
+  const quickSelectionExpand = (startX: number, startY: number) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = imageData.data;
+    
+    const radius = Math.floor(brushSize / 2);
+    const startIdx = (startY * canvasWidth + startX) * 4;
+    const startR = data[startIdx];
+    const startG = data[startIdx + 1];
+    const startB = data[startIdx + 2];
+    
+    // Create or update selection mask
+    let maskCanvas = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+    if (!maskCanvas) {
+      maskCanvas = createCanvas(canvasWidth, canvasHeight);
+      (window as any).__selectionMask = maskCanvas;
+    }
+    
+    const maskCtx = maskCanvas.getContext('2d')!;
+    const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight);
+    
+    // Expand selection in brush radius
+    for (let y = Math.max(0, startY - radius); y < Math.min(canvasHeight, startY + radius); y++) {
+      for (let x = Math.max(0, startX - radius); x < Math.min(canvasWidth, startX + radius); x++) {
+        const dist = Math.sqrt(Math.pow(x - startX, 2) + Math.pow(y - startY, 2));
+        if (dist > radius) continue;
+        
+        const idx = (y * canvasWidth + x) * 4;
+        const dr = Math.abs(data[idx] - startR);
+        const dg = Math.abs(data[idx + 1] - startG);
+        const db = Math.abs(data[idx + 2] - startB);
+        const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+        
+        if (distance < tolerance * 2) {
+          maskData.data[idx] = 255;
+          maskData.data[idx + 1] = 255;
+          maskData.data[idx + 2] = 255;
+          maskData.data[idx + 3] = 255;
+        }
+      }
+    }
+    
+    maskCtx.putImageData(maskData, 0, 0);
+    
+    // Update selection bounding box
+    let minX = canvasWidth, maxX = 0, minY = canvasHeight, maxY = 0;
+    for (let y = 0; y < canvasHeight; y++) {
+      for (let x = 0; x < canvasWidth; x++) {
+        const idx = (y * canvasWidth + x) * 4;
+        if (maskData.data[idx + 3] > 0) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    
+    const contour = extractContourFromMask(maskCanvas);
+    setSelectionContour(contour);
+    setSelection({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+  };
+
+  const applySelectiveColor = (color: string, c: number, m: number, y: number, k: number) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = imageData.data;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i] / 255;
+      const g = data[i + 1] / 255;
+      const b = data[i + 2] / 255;
+      
+      // Convert to CMY
+      let cyan = 1 - r;
+      let magenta = 1 - g;
+      let yellow = 1 - b;
+      
+      // Check if this pixel matches the selected color range
+      let match = false;
+      if (color === 'reds' && r > 0.5 && g < 0.5 && b < 0.5) match = true;
+      else if (color === 'yellows' && r > 0.5 && g > 0.5 && b < 0.5) match = true;
+      else if (color === 'greens' && r < 0.5 && g > 0.5 && b < 0.5) match = true;
+      else if (color === 'cyans' && r < 0.5 && g > 0.5 && b > 0.5) match = true;
+      else if (color === 'blues' && r < 0.5 && g < 0.5 && b > 0.5) match = true;
+      else if (color === 'magentas' && r > 0.5 && g < 0.5 && b > 0.5) match = true;
+      else if (color === 'whites' && r > 0.8 && g > 0.8 && b > 0.8) match = true;
+      else if (color === 'neutrals' && r > 0.3 && r < 0.7) match = true;
+      else if (color === 'blacks' && r < 0.2 && g < 0.2 && b < 0.2) match = true;
+      
+      if (match) {
+        cyan = Math.max(0, Math.min(1, cyan + c / 100));
+        magenta = Math.max(0, Math.min(1, magenta + m / 100));
+        yellow = Math.max(0, Math.min(1, yellow + y / 100));
+        
+        // Convert back to RGB
+        data[i] = Math.round((1 - cyan) * 255);
+        data[i + 1] = Math.round((1 - magenta) * 255);
+        data[i + 2] = Math.round((1 - yellow) * 255);
+      }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    renderComposite();
+    pushHistory(layers, activeLayerId);
+  };
+
   const addLayerMask = () => {
     const activeLayer = getActiveLayer();
     if (!activeLayer) return;
@@ -1561,6 +1964,114 @@ export default function App() {
     link.download = `image.${format}`;
     link.href = exportCanvas.toDataURL(`image/${format}`, 0.92);
     link.click();
+  };
+
+  const saveProject = () => {
+    const projectData = {
+      version: '1.0',
+      canvasWidth,
+      canvasHeight,
+      activeLayerId,
+      layers: layers.map(l => ({
+        id: l.id,
+        name: l.name,
+        visible: l.visible,
+        opacity: l.opacity,
+        blendMode: l.blendMode,
+        locked: l.locked,
+        clippingMask: l.clippingMask,
+        groupId: l.groupId,
+        imageData: l.canvas.toDataURL(),
+        maskData: l.mask ? l.mask.toDataURL() : null,
+      })),
+      layerGroups,
+    };
+    
+    const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.download = 'project.psd';
+    link.href = URL.createObjectURL(blob);
+    link.click();
+  };
+
+  const loadProject = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.psd,.json';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const projectData = JSON.parse(event.target?.result as string);
+          
+          setCanvasWidth(projectData.canvasWidth);
+          setCanvasHeight(projectData.canvasHeight);
+          
+          const loadedLayers: Layer[] = [];
+          let loadCount = 0;
+          
+          projectData.layers.forEach((layerData: any, index: number) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = createCanvas(projectData.canvasWidth, projectData.canvasHeight);
+              canvas.getContext('2d')!.drawImage(img, 0, 0);
+              
+              const layer: Layer = {
+                id: layerData.id,
+                name: layerData.name,
+                visible: layerData.visible,
+                opacity: layerData.opacity,
+                canvas,
+                blendMode: layerData.blendMode,
+                locked: layerData.locked,
+                clippingMask: layerData.clippingMask,
+                groupId: layerData.groupId,
+              };
+              
+              if (layerData.maskData) {
+                const maskImg = new Image();
+                maskImg.onload = () => {
+                  const maskCanvas = createCanvas(projectData.canvasWidth, projectData.canvasHeight);
+                  maskCanvas.getContext('2d')!.drawImage(maskImg, 0, 0);
+                  layer.mask = maskCanvas;
+                  loadCount++;
+                  if (loadCount === projectData.layers.length) {
+                    setLayers(loadedLayers);
+                    setActiveLayerId(projectData.activeLayerId);
+                    setLayerGroups(projectData.layerGroups || []);
+                    const state = saveHistoryState(loadedLayers, projectData.activeLayerId);
+                    setHistory([state]);
+                    setHistoryIndex(0);
+                  }
+                };
+                maskImg.src = layerData.maskData;
+              } else {
+                loadCount++;
+                if (loadCount === projectData.layers.length) {
+                  setLayers(loadedLayers);
+                  setActiveLayerId(projectData.activeLayerId);
+                  setLayerGroups(projectData.layerGroups || []);
+                  const state = saveHistoryState(loadedLayers, projectData.activeLayerId);
+                  setHistory([state]);
+                  setHistoryIndex(0);
+                }
+              }
+              
+              loadedLayers[index] = layer;
+            };
+            img.src = layerData.imageData;
+          });
+        } catch (err) {
+          console.error('Failed to load project:', err);
+          alert('Failed to load project file');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   };
 
   // Filters
@@ -1679,7 +2190,290 @@ export default function App() {
           }
         }
         break;
+      case 'flip-horizontal':
+        const tempCanvasH = createCanvas(canvasWidth, canvasHeight);
+        const tempCtxH = tempCanvasH.getContext('2d')!;
+        tempCtxH.translate(canvasWidth, 0);
+        tempCtxH.scale(-1, 1);
+        tempCtxH.drawImage(activeLayer.canvas, 0, 0);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.drawImage(tempCanvasH, 0, 0);
+        renderComposite();
+        pushHistory(layers, activeLayerId);
+        return;
+      case 'flip-vertical':
+        const tempCanvasV = createCanvas(canvasWidth, canvasHeight);
+        const tempCtxV = tempCanvasV.getContext('2d')!;
+        tempCtxV.translate(0, canvasHeight);
+        tempCtxV.scale(1, -1);
+        tempCtxV.drawImage(activeLayer.canvas, 0, 0);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.drawImage(tempCanvasV, 0, 0);
+        renderComposite();
+        pushHistory(layers, activeLayerId);
+        return;
+      case 'unsharp-mask':
+        // Unsharp mask: sharpen by subtracting blurred version
+        const blurRadius = 1;
+        const amount = 1.5;
+        const tempCanvasU = createCanvas(canvasWidth, canvasHeight);
+        const tempCtxU = tempCanvasU.getContext('2d')!;
+        tempCtxU.filter = `blur(${blurRadius}px)`;
+        tempCtxU.drawImage(activeLayer.canvas, 0, 0);
+        const blurredData = tempCtxU.getImageData(0, 0, canvasWidth, canvasHeight).data;
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = Math.max(0, Math.min(255, data[i] + (data[i] - blurredData[i]) * amount));
+          data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + (data[i + 1] - blurredData[i + 1]) * amount));
+          data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + (data[i + 2] - blurredData[i + 2]) * amount));
+        }
+        break;
+      case 'motion-blur':
+        // Motion blur: blur in one direction
+        const motionRadius = 10;
+        const motionAngle = 0; // horizontal
+        const tempCanvasM = createCanvas(canvasWidth, canvasHeight);
+        const tempCtxM = tempCanvasM.getContext('2d')!;
+        tempCtxM.drawImage(activeLayer.canvas, 0, 0);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.globalAlpha = 1 / (motionRadius * 2 + 1);
+        for (let i = -motionRadius; i <= motionRadius; i++) {
+          ctx.drawImage(tempCanvasM, i, 0);
+        }
+        ctx.globalAlpha = 1;
+        renderComposite();
+        pushHistory(layers, activeLayerId);
+        return;
+      case 'radial-blur':
+        // Radial blur: blur in circular pattern
+        const radialRadius = 5;
+        const tempCanvasR = createCanvas(canvasWidth, canvasHeight);
+        const tempCtxR = tempCanvasR.getContext('2d')!;
+        tempCtxR.drawImage(activeLayer.canvas, 0, 0);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        const centerX = canvasWidth / 2;
+        const centerY = canvasHeight / 2;
+        const alpha = 1 / (radialRadius * 2 + 1);
+        for (let i = -radialRadius; i <= radialRadius; i++) {
+          const angle = (i / radialRadius) * 0.05;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.translate(centerX, centerY);
+          ctx.rotate(angle);
+          ctx.translate(-centerX, -centerY);
+          ctx.drawImage(tempCanvasR, 0, 0);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+        renderComposite();
+        pushHistory(layers, activeLayerId);
+        return;
+      case 'high-pass':
+        // High pass: extract high frequency details
+        const hpRadius = 2;
+        const tempCanvasHP = createCanvas(canvasWidth, canvasHeight);
+        const tempCtxHP = tempCanvasHP.getContext('2d')!;
+        tempCtxHP.filter = `blur(${hpRadius}px)`;
+        tempCtxHP.drawImage(activeLayer.canvas, 0, 0);
+        tempCtxHP.filter = 'none';
+        const hpBlurredData = tempCtxHP.getImageData(0, 0, canvasWidth, canvasHeight).data;
+        for (let i = 0; i < data.length; i += 4) {
+          const diff = Math.abs(data[i] - hpBlurredData[i]) + Math.abs(data[i + 1] - hpBlurredData[i + 1]) + Math.abs(data[i + 2] - hpBlurredData[i + 2]);
+          const val = Math.min(255, diff * 2);
+          data[i] = val;
+          data[i + 1] = val;
+          data[i + 2] = val;
+        }
+        break;
+      case 'vibrance':
+        // Vibrance: increase saturation more for less saturated colors
+        const vibranceAmount = 0.3;
+        for (let i = 0; i < data.length; i += 4) {
+          const max = Math.max(data[i], data[i + 1], data[i + 2]);
+          const min = Math.min(data[i], data[i + 1], data[i + 2]);
+          const sat = (max - min) / 255;
+          const factor = 1 + vibranceAmount * (1 - sat);
+          const gray = 0.2989 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          data[i] = Math.max(0, Math.min(255, gray + factor * (data[i] - gray)));
+          data[i + 1] = Math.max(0, Math.min(255, gray + factor * (data[i + 1] - gray)));
+          data[i + 2] = Math.max(0, Math.min(255, gray + factor * (data[i + 2] - gray)));
+        }
+        break;
     }
+    ctx.putImageData(imageData, 0, 0);
+    renderComposite();
+    pushHistory(layers, activeLayerId);
+  };
+
+  const applyLevels = (blackPoint: number, whitePoint: number, midtone: number) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = imageData.data;
+    
+    const range = whitePoint - blackPoint;
+    const gamma = 1 / midtone;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        let val = data[i + c];
+        // Apply black/white point
+        val = (val - blackPoint) / range * 255;
+        val = Math.max(0, Math.min(255, val));
+        // Apply gamma (midtone)
+        val = Math.pow(val / 255, gamma) * 255;
+        data[i + c] = Math.max(0, Math.min(255, val));
+      }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    renderComposite();
+    pushHistory(layers, activeLayerId);
+  };
+
+  const applyExposure = (exposure: number) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = imageData.data;
+    
+    const factor = Math.pow(2, exposure);
+    
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = Math.max(0, Math.min(255, data[i] * factor));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] * factor));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] * factor));
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    renderComposite();
+    pushHistory(layers, activeLayerId);
+  };
+
+  const applyTemperatureTint = (temperature: number, tint: number) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = imageData.data;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      // Temperature: warm (red/yellow) or cool (blue)
+      data[i] = Math.max(0, Math.min(255, data[i] + temperature));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] - temperature));
+      
+      // Tint: green or magenta
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + tint));
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    renderComposite();
+    pushHistory(layers, activeLayerId);
+  };
+
+  const featherSelection = (radius: number) => {
+    const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+    if (!mask || !selection) return;
+    
+    const maskCtx = mask.getContext('2d')!;
+    const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = maskData.data;
+    const copy = new Uint8ClampedArray(data);
+    
+    // Apply Gaussian blur to mask edges
+    for (let y = 0; y < canvasHeight; y++) {
+      for (let x = 0; x < canvasWidth; x++) {
+        const idx = (y * canvasWidth + x) * 4;
+        if (copy[idx + 3] === 0) continue;
+        
+        let sum = 0;
+        let count = 0;
+        
+        for (let ky = -radius; ky <= radius; ky++) {
+          for (let kx = -radius; kx <= radius; kx++) {
+            const nx = x + kx;
+            const ny = y + ky;
+            if (nx >= 0 && nx < canvasWidth && ny >= 0 && ny < canvasHeight) {
+              const nIdx = (ny * canvasWidth + nx) * 4;
+              const dist = Math.sqrt(kx * kx + ky * ky);
+              if (dist <= radius) {
+                const weight = 1 - dist / radius;
+                sum += copy[nIdx + 3] * weight;
+                count += weight;
+              }
+            }
+          }
+        }
+        
+        if (count > 0) {
+          data[idx + 3] = Math.round(sum / count);
+        }
+      }
+    }
+    
+    maskCtx.putImageData(maskData, 0, 0);
+    renderComposite();
+  };
+
+  const captureBeforeSnapshot = () => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    setBeforeSnapshot(ctx.getImageData(0, 0, canvasWidth, canvasHeight));
+    setShowBeforeAfter(true);
+  };
+
+  const toggleBeforeAfter = () => {
+    if (!beforeSnapshot) return;
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    
+    if (showBeforeAfter) {
+      // Show "after" (current state) - do nothing, already showing
+      setShowBeforeAfter(false);
+    } else {
+      // Show "before" (snapshot)
+      ctx.putImageData(beforeSnapshot, 0, 0);
+      setShowBeforeAfter(true);
+      renderComposite();
+      // Restore after a moment
+      setTimeout(() => {
+        const currentState = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+        ctx.putImageData(beforeSnapshot, 0, 0);
+        renderComposite();
+        setTimeout(() => {
+          ctx.putImageData(currentState, 0, 0);
+          setShowBeforeAfter(false);
+          renderComposite();
+        }, 2000);
+      }, 0);
+    }
+  };
+
+  const applyColorBalance = (shadows: { r: number; g: number; b: number }, midtones: { r: number; g: number; b: number }, highlights: { r: number; g: number; b: number }) => {
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    const data = imageData.data;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const luminance = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+      
+      // Shadows (dark areas)
+      const shadowWeight = Math.max(0, 1 - luminance * 2);
+      // Highlights (bright areas)
+      const highlightWeight = Math.max(0, (luminance - 0.5) * 2);
+      // Midtones
+      const midtoneWeight = 1 - shadowWeight - highlightWeight;
+      
+      data[i] = Math.max(0, Math.min(255, data[i] + shadows.r * shadowWeight + midtones.r * midtoneWeight + highlights.r * highlightWeight));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + shadows.g * shadowWeight + midtones.g * midtoneWeight + highlights.g * highlightWeight));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + shadows.b * shadowWeight + midtones.b * midtoneWeight + highlights.b * highlightWeight));
+    }
+    
     ctx.putImageData(imageData, 0, 0);
     renderComposite();
     pushHistory(layers, activeLayerId);
@@ -2005,12 +2799,51 @@ export default function App() {
       if (e.key === 'Escape') { 
         if (transform?.active) commitTransform(); 
         else if (isCropping && cropRect) cancelCrop();
+        else if (tool === 'polygonal-lasso' && selectionPathRef.current) {
+          selectionPathRef.current = null;
+          setSelectionPath(null);
+        }
         else deselectAll(); 
         setTransform(null); 
       }
       if (e.key === 'Enter') {
         if (transform?.active) commitTransform();
         else if (isCropping && cropRect) applyCrop();
+        else if (tool === 'polygonal-lasso' && selectionPathRef.current && selectionPathRef.current.length > 2) {
+          // Complete polygon selection
+          const path = selectionPathRef.current;
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          path.forEach(p => {
+            minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+            minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+          });
+          
+          const maskCanvas = createCanvas(canvasWidth, canvasHeight);
+          const maskCtx = maskCanvas.getContext('2d')!;
+          const maskData = maskCtx.createImageData(canvasWidth, canvasHeight);
+          
+          for (let y = minY; y <= maxY; y++) {
+            for (let x = minX; x <= maxX; x++) {
+              if (isPointInPolygon(x, y, path)) {
+                const idx = (y * canvasWidth + x) * 4;
+                maskData.data[idx] = 255;
+                maskData.data[idx + 1] = 255;
+                maskData.data[idx + 2] = 255;
+                maskData.data[idx + 3] = 255;
+              }
+            }
+          }
+          
+          maskCtx.putImageData(maskData, 0, 0);
+          const contour = extractContourFromMask(maskCanvas);
+          setSelectionContour(contour);
+          (window as any).__selectionMask = maskCanvas;
+          setSelection({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+          selectionPathRef.current = null;
+          setSelectionPath(null);
+          setIsDrawing(false);
+          renderComposite();
+        }
       }
       if (!e.ctrlKey && !e.altKey) {
         if (e.key === 'b' || e.key === 'B') setTool('brush');
@@ -2044,12 +2877,16 @@ export default function App() {
   const tools: { id: Tool; label: string; shortcut: string; group?: string }[] = [
     { id: 'move', label: 'Move Tool', shortcut: 'V', group: 'A' },
     { id: 'select', label: 'Rectangular Marquee', shortcut: 'M', group: 'A' },
+    { id: 'ellipse-select', label: 'Elliptical Marquee', shortcut: '', group: 'A' },
     { id: 'lasso', label: 'Lasso Tool', shortcut: 'L', group: 'A' },
+    { id: 'polygonal-lasso', label: 'Polygonal Lasso', shortcut: '', group: 'A' },
     { id: 'magic-wand', label: 'Magic Wand', shortcut: 'W', group: 'A' },
+    { id: 'quick-selection', label: 'Quick Selection', shortcut: '', group: 'A' },
     { id: 'crop', label: 'Crop Tool', shortcut: 'C', group: 'A' },
     { id: 'eyedropper', label: 'Eyedropper', shortcut: 'I', group: 'B' },
     { id: 'brush', label: 'Brush Tool', shortcut: 'B', group: 'B' },
     { id: 'clone', label: 'Clone Stamp', shortcut: 'S', group: 'B' },
+    { id: 'healing-brush', label: 'Healing Brush', shortcut: 'J', group: 'B' },
     { id: 'eraser', label: 'Eraser Tool', shortcut: 'E', group: 'B' },
     { id: 'blur-tool', label: 'Blur Tool', shortcut: '', group: 'B' },
     { id: 'sharpen-tool', label: 'Sharpen Tool', shortcut: '', group: 'B' },
@@ -2083,6 +2920,9 @@ export default function App() {
               { label: 'Save as PNG', shortcut: 'Ctrl+S', action: () => saveFile('png') },
               { label: 'Save as JPEG', action: () => saveFile('jpeg') },
               { label: 'Save as WebP', action: () => saveFile('webp') },
+              { sep: true },
+              { label: 'Save Project', action: saveProject },
+              { label: 'Load Project', action: loadProject },
             ]},
             { label: 'Edit', items: [
               { label: 'Undo', shortcut: 'Ctrl+Z', action: undo },
@@ -2094,6 +2934,7 @@ export default function App() {
               { label: 'Select All', shortcut: 'Ctrl+A', action: selectAll },
               { label: 'Deselect', shortcut: 'Ctrl+D', action: deselectAll },
               { label: 'Inverse Selection', action: invertSelection },
+              { label: 'Feather Selection...', action: () => featherSelection(5) },
               { sep: true },
               { label: 'Delete', shortcut: 'Del', action: deleteSelection },
               { label: 'Fill', action: fillSelection },
@@ -2103,6 +2944,9 @@ export default function App() {
               { label: 'Canvas Size...', action: () => setShowResizeDialog(true) },
               { sep: true },
               { label: 'Free Transform', shortcut: 'Ctrl+T', action: startTransform },
+              { sep: true },
+              { label: 'Flip Horizontal', action: () => applyQuickFilter('flip-horizontal') },
+              { label: 'Flip Vertical', action: () => applyQuickFilter('flip-vertical') },
               { sep: true },
               { label: 'Flatten Image', action: flattenImage },
             ]},
@@ -2116,9 +2960,23 @@ export default function App() {
               { sep: true },
               { label: 'Add Layer Mask', action: addLayerMask },
               { label: 'Remove Layer Mask', action: removeLayerMask },
+              { sep: true },
+              { label: 'Create Clipping Mask', action: toggleClippingMask },
+              { label: 'Group Layers', action: createLayerGroup },
             ]},
             { label: 'Filter', items: [
               { label: 'Adjustments...', action: () => setShowFilters(true) },
+              { sep: true },
+              { label: 'Levels...', action: () => setShowLevelsDialog(true) },
+              { label: 'Exposure...', action: () => setShowExposureDialog(true) },
+              { label: 'Color Balance...', action: () => setShowColorBalanceDialog(true) },
+              { label: 'Temperature/Tint...', action: () => {
+                applyTemperatureTint(10, 0);
+              }},
+              { label: 'Selective Color...', action: () => {
+                // Apply default selective color for demonstration
+                applySelectiveColor('reds', 10, 0, 0, 0);
+              }},
               { sep: true },
               { label: 'Invert', action: () => applyQuickFilter('invert') },
               { label: 'Grayscale', action: () => applyQuickFilter('grayscale') },
@@ -2126,10 +2984,16 @@ export default function App() {
               { label: 'Threshold', action: () => applyQuickFilter('threshold') },
               { label: 'Posterize', action: () => applyQuickFilter('posterize') },
               { sep: true },
+              { label: 'Unsharp Mask', action: () => applyQuickFilter('unsharp-mask') },
+              { label: 'High Pass', action: () => applyQuickFilter('high-pass') },
+              { label: 'Motion Blur', action: () => applyQuickFilter('motion-blur') },
+              { label: 'Radial Blur', action: () => applyQuickFilter('radial-blur') },
               { label: 'Noise', action: () => applyQuickFilter('noise') },
               { label: 'Pixelate', action: () => applyQuickFilter('pixelate') },
               { label: 'Emboss', action: () => applyQuickFilter('emboss') },
               { label: 'Vignette', action: () => applyQuickFilter('vignette') },
+              { sep: true },
+              { label: 'Vibrance', action: () => applyQuickFilter('vibrance') },
             ]},
             { label: 'View', items: [
               { label: 'Zoom In', action: () => setZoom(z => Math.min(32, z * 1.5)) },
@@ -2139,6 +3003,9 @@ export default function App() {
               { sep: true },
               { label: showRulers ? '✓ Rulers' : '  Rulers', action: () => setShowRulers(!showRulers) },
               { label: showNavigator ? '✓ Navigator' : '  Navigator', action: () => setShowNavigator(!showNavigator) },
+              { sep: true },
+              { label: 'Capture Before', action: captureBeforeSnapshot },
+              { label: 'Toggle Before/After', action: toggleBeforeAfter },
             ]},
             { label: 'Help', items: [
               { label: 'About PhotoEditor Pro', action: () => setShowAbout(true) },
@@ -2630,6 +3497,144 @@ export default function App() {
           >
             ✕ Cancel (Esc)
           </button>
+        </div>
+      )}
+
+      {/* Levels Dialog */}
+      {showLevelsDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowLevelsDialog(false)}>
+          <div className="bg-[#3c3c3c] rounded-lg p-5 w-[400px] border border-[#555] shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
+              <span className="text-blue-400">📊</span> Levels
+            </h3>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-20">Black Point:</label>
+                <input type="range" min="0" max="255" defaultValue="0" id="levels-black" className="flex-1 accent-blue-500 h-1" />
+                <span className="text-[10px] w-8 text-right" id="levels-black-val">0</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-20">White Point:</label>
+                <input type="range" min="0" max="255" defaultValue="255" id="levels-white" className="flex-1 accent-blue-500 h-1" />
+                <span className="text-[10px] w-8 text-right" id="levels-white-val">255</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-20">Midtone:</label>
+                <input type="range" min="10" max="300" defaultValue="100" id="levels-mid" className="flex-1 accent-blue-500 h-1" />
+                <span className="text-[10px] w-8 text-right" id="levels-mid-val">1.00</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowLevelsDialog(false)} className="px-3 py-1 bg-[#4a4a4a] hover:bg-[#555] rounded text-[11px]">Cancel</button>
+              <button onClick={() => {
+                const black = Number((document.getElementById('levels-black') as HTMLInputElement).value);
+                const white = Number((document.getElementById('levels-white') as HTMLInputElement).value);
+                const mid = Number((document.getElementById('levels-mid') as HTMLInputElement).value) / 100;
+                applyLevels(black, white, mid);
+                setShowLevelsDialog(false);
+              }} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-[11px]">OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exposure Dialog */}
+      {showExposureDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowExposureDialog(false)}>
+          <div className="bg-[#3c3c3c] rounded-lg p-5 w-[350px] border border-[#555] shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
+              <span className="text-blue-400">☀</span> Exposure
+            </h3>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-20">Exposure:</label>
+                <input type="range" min="-300" max="300" defaultValue="0" id="exposure-val" className="flex-1 accent-blue-500 h-1" />
+                <span className="text-[10px] w-10 text-right" id="exposure-display">0.00</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowExposureDialog(false)} className="px-3 py-1 bg-[#4a4a4a] hover:bg-[#555] rounded text-[11px]">Cancel</button>
+              <button onClick={() => {
+                const exposure = Number((document.getElementById('exposure-val') as HTMLInputElement).value) / 100;
+                applyExposure(exposure);
+                setShowExposureDialog(false);
+              }} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-[11px]">OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Color Balance Dialog */}
+      {showColorBalanceDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowColorBalanceDialog(false)}>
+          <div className="bg-[#3c3c3c] rounded-lg p-5 w-[400px] border border-[#555] shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
+              <span className="text-blue-400">🎨</span> Color Balance
+            </h3>
+            <div className="space-y-3">
+              <div className="text-[10px] text-gray-400 font-bold">Shadows</div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Cyan/Red:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-sr" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Magenta/Green:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-sg" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Yellow/Blue:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-sb" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="text-[10px] text-gray-400 font-bold mt-2">Midtones</div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Cyan/Red:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-mr" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Magenta/Green:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-mg" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Yellow/Blue:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-mb" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="text-[10px] text-gray-400 font-bold mt-2">Highlights</div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Cyan/Red:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-hr" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Magenta/Green:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-hg" className="flex-1 accent-blue-500 h-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-gray-400 w-10">Yellow/Blue:</label>
+                <input type="range" min="-100" max="100" defaultValue="0" id="cb-hb" className="flex-1 accent-blue-500 h-1" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowColorBalanceDialog(false)} className="px-3 py-1 bg-[#4a4a4a] hover:bg-[#555] rounded text-[11px]">Cancel</button>
+              <button onClick={() => {
+                const shadows = {
+                  r: Number((document.getElementById('cb-sr') as HTMLInputElement).value),
+                  g: Number((document.getElementById('cb-sg') as HTMLInputElement).value),
+                  b: Number((document.getElementById('cb-sb') as HTMLInputElement).value),
+                };
+                const midtones = {
+                  r: Number((document.getElementById('cb-mr') as HTMLInputElement).value),
+                  g: Number((document.getElementById('cb-mg') as HTMLInputElement).value),
+                  b: Number((document.getElementById('cb-mb') as HTMLInputElement).value),
+                };
+                const highlights = {
+                  r: Number((document.getElementById('cb-hr') as HTMLInputElement).value),
+                  g: Number((document.getElementById('cb-hg') as HTMLInputElement).value),
+                  b: Number((document.getElementById('cb-hb') as HTMLInputElement).value),
+                };
+                applyColorBalance(shadows, midtones, highlights);
+                setShowColorBalanceDialog(false);
+              }} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-[11px]">OK</button>
+            </div>
+          </div>
         </div>
       )}
 

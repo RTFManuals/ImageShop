@@ -1,7 +1,10 @@
 export type Tool =
   | 'move'
   | 'select'
+  | 'ellipse-select'
   | 'lasso'
+  | 'polygonal-lasso'
+  | 'quick-selection'
   | 'magic-wand'
   | 'crop'
   | 'eyedropper'
@@ -14,6 +17,7 @@ export type Tool =
   | 'burn'
   | 'smudge'
   | 'clone'
+  | 'healing-brush'
   | 'fill'
   | 'text'
   | 'pen'
@@ -33,6 +37,17 @@ export interface Layer {
   locked: boolean;
   mask?: HTMLCanvasElement;
   thumbnail?: string;
+  clippingMask?: boolean;
+  groupId?: string;
+}
+
+export interface LayerGroup {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  layerIds: string[];
+  expanded: boolean;
 }
 
 export interface HistoryState {
