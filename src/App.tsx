@@ -1110,6 +1110,18 @@ export default function App() {
     }
   };
 
+  // Redraw cursor overlay when tool changes
+  useEffect(() => {
+    const overlay = cursorOverlayRef.current;
+    if (overlay && cursorPosRef.current) {
+      // Clear and redraw cursor at last known position
+      const ctx = overlay.getContext('2d')!;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      drawCursorOverlay(cursorPosRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, brushSize]);
+
   const handleMouseUp = (e: React.MouseEvent) => {
     if (isPanning.current) { isPanning.current = false; return; }
     if (!isDrawing) return;
