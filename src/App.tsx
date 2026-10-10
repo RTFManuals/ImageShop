@@ -242,6 +242,16 @@ export default function App() {
 
     // Selection marching ants
     if (selection) {
+      const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+      
+      if (mask) {
+        // Draw selection mask as semi-transparent overlay
+        ctx.globalAlpha = 0.3;
+        ctx.drawImage(mask, 0, 0);
+        ctx.globalAlpha = 1;
+      }
+      
+      // Draw marching ants on bounding box
       const time = Date.now() / 100;
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 1;
@@ -541,30 +551,91 @@ export default function App() {
   };
 
   const magicWandSelect = (startX: number, startY: number) => {
-    const mainCanvas = mainCanvasRef.current!;
-    const ctx = mainCanvas.getContext('2d')!;
+    // Use active layer instead of composite
+    const activeLayer = getActiveLayer();
+    if (!activeLayer) return;
+    const ctx = activeLayer.canvas.getContext('2d')!;
     const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
     const data = imageData.data;
+    
     const startIdx = (startY * canvasWidth + startX) * 4;
-    const startR = data[startIdx], startG = data[startIdx + 1], startB = data[startIdx + 2];
+    const startR = data[startIdx];
+    const startG = data[startIdx + 1];
+    const startB = data[startIdx + 2];
+    const startA = data[startIdx + 3];
+    
+    // If clicked on transparent pixel, select all transparent areas
+    const selectTransparent = startA < 10;
+    
     const visited = new Uint8Array(canvasWidth * canvasHeight);
+    const selected = new Uint8Array(canvasWidth * canvasHeight);
     const stack: [number, number][] = [[startX, startY]];
     let minX = startX, maxX = startX, minY = startY, maxY = startY;
+    
     while (stack.length > 0) {
       const [x, y] = stack.pop()!;
       if (x < 0 || x >= canvasWidth || y < 0 || y >= canvasHeight) continue;
       const pixelIdx = y * canvasWidth + x;
       if (visited[pixelIdx]) continue;
+      
       const idx = pixelIdx * 4;
-      const dr = Math.abs(data[idx] - startR);
-      const dg = Math.abs(data[idx + 1] - startG);
-      const db = Math.abs(data[idx + 2] - startB);
-      if (dr + dg + db > tolerance * 4) continue;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+      
+      let shouldSelect = false;
+      
+      if (selectTransparent) {
+        // Select transparent or semi-transparent pixels
+        shouldSelect = a < 10;
+      } else {
+        // Select pixels similar to start color
+        const dr = Math.abs(r - startR);
+        const dg = Math.abs(g - startG);
+        const db = Math.abs(b - startB);
+        const da = Math.abs(a - startA);
+        // Use Euclidean distance for better color matching
+        const distance = Math.sqrt(dr * dr + dg * dg + db * db + da * da);
+        shouldSelect = distance <= tolerance * 2;
+      }
+      
+      if (!shouldSelect) continue;
+      
       visited[pixelIdx] = 1;
-      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+      selected[pixelIdx] = 1;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      
+      // 8-connected flood fill for better contour detection
+      stack.push(
+        [x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1],
+        [x + 1, y + 1], [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1]
+      );
     }
+    
+    // Create selection mask
+    const maskCanvas = createCanvas(canvasWidth, canvasHeight);
+    const maskCtx = maskCanvas.getContext('2d')!;
+    const maskData = maskCtx.createImageData(canvasWidth, canvasHeight);
+    
+    for (let i = 0; i < selected.length; i++) {
+      if (selected[i]) {
+        maskData.data[i * 4] = 255;     // R
+        maskData.data[i * 4 + 1] = 255; // G
+        maskData.data[i * 4 + 2] = 255; // B
+        maskData.data[i * 4 + 3] = 128; // A (semi-transparent for visualization)
+      }
+    }
+    
+    maskCtx.putImageData(maskData, 0, 0);
+    
+    // Store selection mask globally for later use
+    (window as any).__selectionMask = maskCanvas;
+    
+    // Set bounding box for now (real mask is stored separately)
     setSelection({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
     renderComposite();
   };
@@ -624,12 +695,14 @@ export default function App() {
         setIsDrawing(true);
         setSelectionStart(pos);
         setSelection(null);
+        (window as any).__selectionMask = null;
         break;
       case 'lasso':
         setIsDrawing(true);
         setSelectionPath([pos]);
         selectionPathRef.current = [pos];
         setSelection(null);
+        (window as any).__selectionMask = null;
         break;
       case 'text':
         setTextPosition(pos);
@@ -1098,6 +1171,11 @@ export default function App() {
     setLayers(prev => prev.map(l => l.id === id ? { ...l, [prop]: value } : l));
   };
 
+  // Re-render when layers change
+  useEffect(() => {
+    renderComposite();
+  }, [layers]);
+
   const mergeDown = (id: string) => {
     const idx = layers.findIndex(l => l.id === id);
     if (idx <= 0) return;
@@ -1358,7 +1436,26 @@ export default function App() {
     if (!selection) return;
     const activeLayer = getActiveLayer();
     if (!activeLayer) return;
-    activeLayer.canvas.getContext('2d')!.clearRect(selection.x, selection.y, selection.w, selection.h);
+    const ctx = activeLayer.canvas.getContext('2d')!;
+    const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+    
+    if (mask) {
+      // Use selection mask for precise deletion
+      const layerData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+      const maskData = mask.getContext('2d')!.getImageData(0, 0, canvasWidth, canvasHeight);
+      
+      for (let i = 0; i < layerData.data.length; i += 4) {
+        if (maskData.data[i + 3] > 0) {
+          layerData.data[i + 3] = 0; // Make transparent
+        }
+      }
+      
+      ctx.putImageData(layerData, 0, 0);
+    } else {
+      // Fallback to bounding box
+      ctx.clearRect(selection.x, selection.y, selection.w, selection.h);
+    }
+    
     renderComposite();
     pushHistory(layers, activeLayerId);
   };
@@ -1368,8 +1465,30 @@ export default function App() {
     const activeLayer = getActiveLayer();
     if (!activeLayer) return;
     const ctx = activeLayer.canvas.getContext('2d')!;
-    ctx.fillStyle = fgColor;
-    ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
+    const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+    
+    if (mask) {
+      // Use selection mask for precise fill
+      const layerData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+      const maskData = mask.getContext('2d')!.getImageData(0, 0, canvasWidth, canvasHeight);
+      const fillColor = hexToRgba(fgColor);
+      
+      for (let i = 0; i < layerData.data.length; i += 4) {
+        if (maskData.data[i + 3] > 0) {
+          layerData.data[i] = fillColor.r;
+          layerData.data[i + 1] = fillColor.g;
+          layerData.data[i + 2] = fillColor.b;
+          layerData.data[i + 3] = fillColor.a;
+        }
+      }
+      
+      ctx.putImageData(layerData, 0, 0);
+    } else {
+      // Fallback to bounding box
+      ctx.fillStyle = fgColor;
+      ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
+    }
+    
     renderComposite();
     pushHistory(layers, activeLayerId);
   };
@@ -1379,15 +1498,68 @@ export default function App() {
     const activeLayer = getActiveLayer();
     if (!activeLayer) return;
     const ctx = activeLayer.canvas.getContext('2d')!;
-    ctx.strokeStyle = fgColor;
-    ctx.lineWidth = brushSize;
-    ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+    const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
+    
+    if (mask) {
+      // Create edge detection from mask
+      const maskData = mask.getContext('2d')!.getImageData(0, 0, canvasWidth, canvasHeight);
+      const layerData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+      const strokeColor = hexToRgba(fgColor);
+      const halfStroke = Math.floor(brushSize / 2);
+      
+      for (let y = 0; y < canvasHeight; y++) {
+        for (let x = 0; x < canvasWidth; x++) {
+          const idx = (y * canvasWidth + x) * 4;
+          if (maskData.data[idx + 3] === 0) continue;
+          
+          // Check if this is an edge pixel
+          let isEdge = false;
+          for (let dy = -halfStroke; dy <= halfStroke && !isEdge; dy++) {
+            for (let dx = -halfStroke; dx <= halfStroke && !isEdge; dx++) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (nx < 0 || nx >= canvasWidth || ny < 0 || ny >= canvasHeight) {
+                isEdge = true;
+                continue;
+              }
+              const nIdx = (ny * canvasWidth + nx) * 4;
+              if (maskData.data[nIdx + 3] === 0) {
+                isEdge = true;
+              }
+            }
+          }
+          
+          if (isEdge) {
+            layerData.data[idx] = strokeColor.r;
+            layerData.data[idx + 1] = strokeColor.g;
+            layerData.data[idx + 2] = strokeColor.b;
+            layerData.data[idx + 3] = strokeColor.a;
+          }
+        }
+      }
+      
+      ctx.putImageData(layerData, 0, 0);
+    } else {
+      // Fallback to bounding box
+      ctx.strokeStyle = fgColor;
+      ctx.lineWidth = brushSize;
+      ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+    }
+    
     renderComposite();
     pushHistory(layers, activeLayerId);
   };
 
-  const selectAll = () => { setSelection({ x: 0, y: 0, w: canvasWidth, h: canvasHeight }); renderComposite(); };
-  const deselectAll = () => { setSelection(null); renderComposite(); };
+  const selectAll = () => { 
+    setSelection({ x: 0, y: 0, w: canvasWidth, h: canvasHeight }); 
+    (window as any).__selectionMask = null;
+    renderComposite(); 
+  };
+  const deselectAll = () => { 
+    setSelection(null); 
+    (window as any).__selectionMask = null;
+    renderComposite(); 
+  };
   const invertSelection = () => {
     if (!selection) { selectAll(); return; }
     // Simple invert - just select the inverse bounding area
