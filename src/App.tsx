@@ -179,6 +179,9 @@ export default function App() {
   const selectionPathRef = useRef<{ x: number; y: number }[] | null>(null);
   const [selectionContour, setSelectionContour] = useState<{ x: number; y: number }[] | null>(null);
   const [pixelColor, setPixelColor] = useState('#ffffff');
+  const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropStart, setCropStart] = useState<{ x: number; y: number } | null>(null);
 
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const navigatorCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -821,6 +824,12 @@ export default function App() {
         setSelectionContour(null);
         (window as any).__selectionMask = null;
         break;
+      case 'crop':
+        setIsDrawing(true);
+        setIsCropping(true);
+        setCropStart(pos);
+        setCropRect({ x: pos.x, y: pos.y, w: 0, h: 0 });
+        break;
       case 'text':
         setTextPosition(pos);
         setShowTextDialog(true);
@@ -1007,6 +1016,44 @@ export default function App() {
           }
         }
         break;
+      case 'crop':
+        if (isCropping && cropStart) {
+          const cropRect = {
+            x: Math.min(cropStart.x, pos.x),
+            y: Math.min(cropStart.y, pos.y),
+            w: Math.abs(pos.x - cropStart.x),
+            h: Math.abs(pos.y - cropStart.y),
+          };
+          setCropRect(cropRect);
+          // Draw crop rectangle on overlay
+          const overlay = cursorOverlayRef.current;
+          if (overlay) {
+            const octx = overlay.getContext('2d')!;
+            octx.clearRect(0, 0, overlay.width, overlay.height);
+            // Darken area outside crop
+            octx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            octx.fillRect(0, 0, overlay.width, cropRect.y);
+            octx.fillRect(0, cropRect.y + cropRect.h, overlay.width, overlay.height - cropRect.y - cropRect.h);
+            octx.fillRect(0, cropRect.y, cropRect.x, cropRect.h);
+            octx.fillRect(cropRect.x + cropRect.w, cropRect.y, overlay.width - cropRect.x - cropRect.w, cropRect.h);
+            // Draw crop border
+            octx.strokeStyle = '#fff';
+            octx.lineWidth = 2;
+            octx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+            // Draw corner handles
+            const handleSize = 8;
+            octx.fillStyle = '#fff';
+            octx.fillRect(cropRect.x - handleSize/2, cropRect.y - handleSize/2, handleSize, handleSize);
+            octx.fillRect(cropRect.x + cropRect.w - handleSize/2, cropRect.y - handleSize/2, handleSize, handleSize);
+            octx.fillRect(cropRect.x - handleSize/2, cropRect.y + cropRect.h - handleSize/2, handleSize, handleSize);
+            octx.fillRect(cropRect.x + cropRect.w - handleSize/2, cropRect.y + cropRect.h - handleSize/2, handleSize, handleSize);
+            // Draw dimension text
+            octx.fillStyle = '#fff';
+            octx.font = '12px sans-serif';
+            octx.fillText(`${Math.round(cropRect.w)} × ${Math.round(cropRect.h)}`, cropRect.x + 5, cropRect.y - 5);
+          }
+        }
+        break;
       case 'blur-tool':
       case 'sharpen-tool':
         applyBlurSharpen(ctx, pos, tool === 'blur-tool');
@@ -1074,7 +1121,7 @@ export default function App() {
     const ctx = overlay.getContext('2d')!;
     
     // Don't clear if we're drawing shapes or selection (they handle their own overlay)
-    if (!isDrawing || !['line', 'rectangle', 'ellipse', 'gradient', 'lasso', 'select'].includes(tool)) {
+    if (!isDrawing || !['line', 'rectangle', 'ellipse', 'gradient', 'lasso', 'select', 'crop'].includes(tool)) {
       ctx.clearRect(0, 0, overlay.width, overlay.height);
     }
     // Draw brush circle for brush-like tools
@@ -1092,7 +1139,7 @@ export default function App() {
       ctx.setLineDash([]);
     }
     // Crosshair
-    if (!['hand', 'move', 'zoom'].includes(tool)) {
+    if (!['hand', 'move', 'zoom', 'crop'].includes(tool)) {
       ctx.strokeStyle = 'rgba(255,255,255,0.4)';
       ctx.lineWidth = 0.5;
       ctx.beginPath();
@@ -1229,6 +1276,11 @@ export default function App() {
       setSelectionPath(null);
       selectionPathRef.current = null;
       renderComposite();
+    }
+
+    if (tool === 'crop' && isCropping && cropRect && cropRect.w > 0 && cropRect.h > 0) {
+      setIsDrawing(false);
+      // Keep crop rect visible for confirmation
     }
 
     setIsDrawing(false);
@@ -1867,6 +1919,73 @@ export default function App() {
     setShowTextDialog(false);
   };
 
+  const applyCrop = () => {
+    if (!cropRect) return;
+    
+    const newWidth = Math.round(cropRect.w);
+    const newHeight = Math.round(cropRect.h);
+    const offsetX = Math.round(cropRect.x);
+    const offsetY = Math.round(cropRect.y);
+    
+    // Crop each layer
+    const newLayers = layers.map(layer => {
+      const newCanvas = createCanvas(newWidth, newHeight);
+      const newCtx = newCanvas.getContext('2d')!;
+      
+      // Copy cropped area from original canvas
+      newCtx.drawImage(
+        layer.canvas,
+        offsetX, offsetY, newWidth, newHeight,
+        0, 0, newWidth, newHeight
+      );
+      
+      // Handle mask if exists
+      let newMask: HTMLCanvasElement | undefined;
+      if (layer.mask) {
+        newMask = createCanvas(newWidth, newHeight);
+        const maskCtx = newMask.getContext('2d')!;
+        maskCtx.drawImage(
+          layer.mask,
+          offsetX, offsetY, newWidth, newHeight,
+          0, 0, newWidth, newHeight
+        );
+      }
+      
+      return {
+        ...layer,
+        canvas: newCanvas,
+        mask: newMask,
+      };
+    });
+    
+    setCanvasWidth(newWidth);
+    setCanvasHeight(newHeight);
+    setLayers(newLayers);
+    setCropRect(null);
+    setIsCropping(false);
+    setCropStart(null);
+    
+    // Clear overlay
+    const overlay = cursorOverlayRef.current;
+    if (overlay) {
+      overlay.getContext('2d')!.clearRect(0, 0, overlay.width, overlay.height);
+    }
+    
+    pushHistory(newLayers, activeLayerId);
+  };
+
+  const cancelCrop = () => {
+    setCropRect(null);
+    setIsCropping(false);
+    setCropStart(null);
+    
+    // Clear overlay
+    const overlay = cursorOverlayRef.current;
+    if (overlay) {
+      overlay.getContext('2d')!.clearRect(0, 0, overlay.width, overlay.height);
+    }
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1883,8 +2002,16 @@ export default function App() {
       if (e.ctrlKey && e.key === 'v') { e.preventDefault(); pasteClipboard(); }
       if (e.ctrlKey && e.key === 't') { e.preventDefault(); startTransform(); }
       if (e.key === 'Delete' && selection) deleteSelection();
-      if (e.key === 'Escape') { if (transform?.active) commitTransform(); deselectAll(); setTransform(null); }
-      if (e.key === 'Enter' && transform?.active) commitTransform();
+      if (e.key === 'Escape') { 
+        if (transform?.active) commitTransform(); 
+        else if (isCropping && cropRect) cancelCrop();
+        else deselectAll(); 
+        setTransform(null); 
+      }
+      if (e.key === 'Enter') {
+        if (transform?.active) commitTransform();
+        else if (isCropping && cropRect) applyCrop();
+      }
       if (!e.ctrlKey && !e.altKey) {
         if (e.key === 'b' || e.key === 'B') setTool('brush');
         if (e.key === 'e' || e.key === 'E') setTool('eraser');
@@ -2166,7 +2293,7 @@ export default function App() {
                   width={canvasWidth}
                   height={canvasHeight}
                   className="shadow-2xl"
-                  style={{ imageRendering: zoom > 4 ? 'pixelated' : 'auto', cursor: tool === 'hand' ? 'grab' : tool === 'move' ? 'move' : tool === 'zoom' ? 'zoom-in' : tool === 'text' ? 'text' : tool === 'eyedropper' ? 'crosshair' : 'none' }}
+                  style={{ imageRendering: zoom > 4 ? 'pixelated' : 'auto', cursor: tool === 'hand' ? 'grab' : tool === 'move' ? 'move' : tool === 'zoom' ? 'zoom-in' : tool === 'text' ? 'text' : tool === 'eyedropper' ? 'crosshair' : tool === 'crop' ? 'crosshair' : 'none' }}
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
@@ -2481,6 +2608,28 @@ export default function App() {
               <button onClick={applyText} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-[11px]">OK</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Crop Tool UI */}
+      {isCropping && cropRect && cropRect.w > 0 && cropRect.h > 0 && (
+        <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-[#2d2d2d] border border-[#555] rounded-lg shadow-2xl p-3 flex items-center gap-3 z-50">
+          <div className="text-xs text-gray-300">
+            {Math.round(cropRect.w)} × {Math.round(cropRect.h)} px
+          </div>
+          <div className="w-px h-6 bg-[#555]"></div>
+          <button 
+            onClick={applyCrop}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium"
+          >
+            ✓ Apply (Enter)
+          </button>
+          <button 
+            onClick={cancelCrop}
+            className="px-4 py-1.5 bg-[#4a4a4a] hover:bg-[#555] text-white rounded text-xs font-medium"
+          >
+            ✕ Cancel (Esc)
+          </button>
         </div>
       )}
 
