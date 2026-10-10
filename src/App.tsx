@@ -206,8 +206,14 @@ export default function App() {
 
   // Render composite
   const renderComposite = useCallback(() => {
+    console.log('🎨 renderComposite вызвана');
+    console.log('  layers:', layers.map(l => ({ id: l.id, name: l.name, visible: l.visible })));
+    
     const mainCanvas = mainCanvasRef.current;
-    if (!mainCanvas) return;
+    if (!mainCanvas) {
+      console.log('  ⚠️ mainCanvas не существует!');
+      return;
+    }
     const ctx = mainCanvas.getContext('2d')!;
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
@@ -220,8 +226,14 @@ export default function App() {
       }
     }
 
+    let visibleCount = 0;
     layers.forEach(layer => {
-      if (!layer.visible) return;
+      console.log(`  Обработка слоя ${layer.name}: visible=${layer.visible}`);
+      if (!layer.visible) {
+        console.log(`    ⏭️ Пропускаем (невидимый)`);
+        return;
+      }
+      visibleCount++;
       ctx.globalAlpha = layer.opacity / 100;
       ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
       if (layer.mask) {
@@ -235,7 +247,9 @@ export default function App() {
       } else {
         ctx.drawImage(layer.canvas, 0, 0);
       }
+      console.log(`    ✅ Отрисован`);
     });
+    console.log(`  Всего отрисовано слоёв: ${visibleCount}`);
 
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -406,6 +420,7 @@ export default function App() {
   }, [drawRulers]);
 
   useEffect(() => {
+    console.log('📊 useEffect [renderComposite] сработал');
     renderComposite();
   }, [renderComposite]);
 
@@ -1168,7 +1183,54 @@ export default function App() {
   };
 
   const updateLayerProperty = (id: string, prop: keyof Layer, value: any) => {
-    setLayers(prev => prev.map(l => l.id === id ? { ...l, [prop]: value } : l));
+    console.log('🔄 updateLayerProperty:', { id, prop, value });
+    console.log('  Текущие layers:', layers.map(l => ({ id: l.id, visible: l.visible })));
+    setLayers(prev => {
+      const newLayers = prev.map(l => l.id === id ? { ...l, [prop]: value } : l);
+      console.log('  Новые layers:', newLayers.map(l => ({ id: l.id, visible: l.visible })));
+      
+      // Принудительная перерисовка canvas после обновления state
+      requestAnimationFrame(() => {
+        console.log('🎯 requestAnimationFrame: принудительная перерисовка');
+        const mainCanvas = mainCanvasRef.current;
+        if (!mainCanvas) return;
+        const ctx = mainCanvas.getContext('2d')!;
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        
+        // Checkerboard
+        const size = 8;
+        for (let y = 0; y < canvasHeight; y += size) {
+          for (let x = 0; x < canvasWidth; x += size) {
+            ctx.fillStyle = ((x / size + y / size) % 2 === 0) ? '#b0b0b0' : '#e0e0e0';
+            ctx.fillRect(x, y, size, size);
+          }
+        }
+        
+        // Отрисовка видимых слоёв
+        let visibleCount = 0;
+        newLayers.forEach(layer => {
+          if (!layer.visible) return;
+          visibleCount++;
+          ctx.globalAlpha = layer.opacity / 100;
+          ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
+          if (layer.mask) {
+            const tempCanvas = createCanvas(canvasWidth, canvasHeight);
+            const tempCtx = tempCanvas.getContext('2d')!;
+            tempCtx.drawImage(layer.canvas, 0, 0);
+            tempCtx.globalCompositeOperation = 'destination-in';
+            tempCtx.drawImage(layer.mask, 0, 0);
+            ctx.drawImage(tempCanvas, 0, 0);
+          } else {
+            ctx.drawImage(layer.canvas, 0, 0);
+          }
+        });
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        console.log(`✅ Отрисовано ${visibleCount} видимых слоёв`);
+      });
+      
+      return newLayers;
+    });
   };
 
   // Re-render when layers change
@@ -1994,8 +2056,14 @@ export default function App() {
                 <div className="flex-1 overflow-y-auto">
                   {[...layers].reverse().map(layer => (
                     <div key={layer.id} onClick={() => setActiveLayerId(layer.id)} className={`flex items-center gap-1 px-1.5 py-1 border-b border-[#2a2a2a] cursor-pointer ${layer.id === activeLayerId ? 'bg-[#4a90d9]' : 'hover:bg-[#4a4a4a]'}`}>
-                      <button onClick={(e) => { e.stopPropagation(); updateLayerProperty(layer.id, 'visible', !layer.visible); }} className="text-[10px] w-4 opacity-70 hover:opacity-100">
-                        {layer.visible ? '👁' : ''}
+                      <button onClick={(e) => { 
+                        e.stopPropagation(); 
+                        console.log('👆 Клик на глаз для слоя:', layer.id);
+                        console.log('  Текущее visible:', layer.visible);
+                        console.log('  Новое значение:', !layer.visible);
+                        updateLayerProperty(layer.id, 'visible', !layer.visible); 
+                      }} className="text-[10px] w-4 h-4 flex items-center justify-center opacity-70 hover:opacity-100" title={layer.visible ? 'Скрыть слой' : 'Показать слой'}>
+                        {layer.visible ? '👁' : '○'}
                       </button>
                       <div className="w-8 h-8 bg-[#333] rounded-sm border border-[#555] overflow-hidden shrink-0 relative">
                         <canvas ref={el => { if (el) { const c = el.getContext('2d')!; c.clearRect(0, 0, 32, 32); c.drawImage(layer.canvas, 0, 0, 32, 32); } }} width={32} height={32} className="w-full h-full" />
