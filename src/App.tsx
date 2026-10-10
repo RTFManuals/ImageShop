@@ -168,6 +168,7 @@ export default function App() {
   const [filterValues, setFilterValues] = useState({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0 });
   const [activeTab, setActiveTab] = useState<'layers' | 'history' | 'color' | 'navigator'>('layers');
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+  const cursorPosRef = useRef({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; canvasX: number; canvasY: number } | null>(null);
   const [transform, setTransform] = useState<TransformState | null>(null);
   const [cloneSource, setCloneSource] = useState<{ x: number; y: number } | null>(null);
@@ -449,6 +450,17 @@ export default function App() {
       console.log('⚠️ Cursor overlay не инициализирован');
     }
   }, []);
+
+  // Redraw cursor overlay when layers change (after copy/paste/delete operations)
+  useEffect(() => {
+    const overlay = cursorOverlayRef.current;
+    if (overlay && cursorPosRef.current) {
+      // Clear and redraw cursor at last known position
+      const ctx = overlay.getContext('2d')!;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      drawCursorOverlay(cursorPosRef.current);
+    }
+  }, [layers]);
 
   const pushHistory = (currentLayers: Layer[], currentActiveId: string) => {
     const state = saveHistoryState(currentLayers, currentActiveId);
@@ -845,6 +857,7 @@ export default function App() {
   const handleMouseMove = (e: React.MouseEvent) => {
     const pos = getCanvasCoords(e);
     setCursorPos(pos);
+    cursorPosRef.current = pos;
 
     // Get pixel color under cursor
     if (pos.x >= 0 && pos.x < canvasWidth && pos.y >= 0 && pos.y < canvasHeight && mainCanvasRef.current) {
@@ -1164,9 +1177,6 @@ export default function App() {
     setSelectionStart(null);
     setSelectionPath(null);
     selectionPathRef.current = null;
-    // Clear overlay (but keep selection visible via renderComposite)
-    const overlay = cursorOverlayRef.current;
-    if (overlay) overlay.getContext('2d')!.clearRect(0, 0, overlay.width, overlay.height);
     // Only push history for tools that modify the canvas
     if (['brush', 'eraser', 'fill', 'blur-tool', 'sharpen-tool', 'dodge', 'burn', 'smudge', 'clone', 'line', 'rectangle', 'ellipse', 'gradient', 'move'].includes(tool)) {
       pushHistory(layers, activeLayerId);
