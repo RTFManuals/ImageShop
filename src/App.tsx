@@ -205,7 +205,7 @@ export default function App() {
   }, []);
 
   // Render composite
-  const renderComposite = () => {
+  const renderComposite = useCallback(() => {
     const mainCanvas = mainCanvasRef.current;
     if (!mainCanvas) return;
     const ctx = mainCanvas.getContext('2d')!;
@@ -291,7 +291,7 @@ export default function App() {
 
     // Update navigator
     updateNavigator();
-  };
+  }, [layers, canvasWidth, canvasHeight, selection, transform]);
 
   const updateNavigator = () => {
     const navCanvas = navigatorCanvasRef.current;
@@ -407,7 +407,7 @@ export default function App() {
 
   useEffect(() => {
     renderComposite();
-  }, [layers, canvasWidth, canvasHeight, selection, transform]);
+  }, [renderComposite]);
 
   const pushHistory = (currentLayers: Layer[], currentActiveId: string) => {
     const state = saveHistoryState(currentLayers, currentActiveId);
@@ -1168,39 +1168,7 @@ export default function App() {
   };
 
   const updateLayerProperty = (id: string, prop: keyof Layer, value: any) => {
-    const newLayers = layers.map(l => l.id === id ? { ...l, [prop]: value } : l);
-    setLayers(newLayers);
-    // Directly re-render after state update to ensure canvas reflects changes
-    setTimeout(() => {
-      const mainCanvas = mainCanvasRef.current;
-      if (!mainCanvas) return;
-      const ctx = mainCanvas.getContext('2d')!;
-      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-      const size = 8;
-      for (let y = 0; y < canvasHeight; y += size) {
-        for (let x = 0; x < canvasWidth; x += size) {
-          ctx.fillStyle = ((x / size + y / size) % 2 === 0) ? '#b0b0b0' : '#e0e0e0';
-          ctx.fillRect(x, y, size, size);
-        }
-      }
-      newLayers.forEach(layer => {
-        if (!layer.visible) return;
-        ctx.globalAlpha = layer.opacity / 100;
-        ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
-        if (layer.mask) {
-          const tempCanvas = createCanvas(canvasWidth, canvasHeight);
-          const tempCtx = tempCanvas.getContext('2d')!;
-          tempCtx.drawImage(layer.canvas, 0, 0);
-          tempCtx.globalCompositeOperation = 'destination-in';
-          tempCtx.drawImage(layer.mask, 0, 0);
-          ctx.drawImage(tempCanvas, 0, 0);
-        } else {
-          ctx.drawImage(layer.canvas, 0, 0);
-        }
-      });
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = 'source-over';
-    }, 0);
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, [prop]: value } : l));
   };
 
   // Re-render when layers change
