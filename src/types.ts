@@ -1,20 +1,27 @@
 export type Tool =
   | 'move'
   | 'select'
+  | 'lasso'
+  | 'magic-wand'
+  | 'crop'
+  | 'eyedropper'
   | 'brush'
   | 'eraser'
-  | 'fill'
-  | 'eyedropper'
-  | 'text'
   | 'gradient'
+  | 'blur-tool'
+  | 'sharpen-tool'
+  | 'dodge'
+  | 'burn'
+  | 'smudge'
+  | 'clone'
+  | 'fill'
+  | 'text'
+  | 'pen'
   | 'line'
   | 'rectangle'
   | 'ellipse'
-  | 'crop'
   | 'zoom'
-  | 'blur-tool'
-  | 'sharpen-tool'
-  | 'clone';
+  | 'hand';
 
 export interface Layer {
   id: string;
@@ -24,6 +31,8 @@ export interface Layer {
   canvas: HTMLCanvasElement;
   blendMode: string;
   locked: boolean;
+  mask?: HTMLCanvasElement;
+  thumbnail?: string;
 }
 
 export interface HistoryState {
@@ -35,19 +44,9 @@ export interface HistoryState {
     imageData: ImageData;
     blendMode: string;
     locked: boolean;
+    maskData?: ImageData | null;
   }[];
   activeLayerId: string;
-}
-
-export interface TextLayerData {
-  text: string;
-  x: number;
-  y: number;
-  font: string;
-  size: number;
-  color: string;
-  bold: boolean;
-  italic: boolean;
 }
 
 export interface FilterOptions {
@@ -57,6 +56,19 @@ export interface FilterOptions {
   hue: number;
   blur: number;
   sharpen: number;
+}
+
+export interface TransformState {
+  active: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  layerId: string;
+  snapshot?: ImageData;
 }
 
 export const BLEND_MODES = [
@@ -76,4 +88,19 @@ export const BLEND_MODES = [
   'saturation',
   'color',
   'luminosity',
+];
+
+export const FONTS = [
+  'Arial',
+  'Helvetica',
+  'Times New Roman',
+  'Courier New',
+  'Georgia',
+  'Verdana',
+  'Impact',
+  'Comic Sans MS',
+  'Trebuchet MS',
+  'Palatino',
+  'Garamond',
+  'Lucida Console',
 ];
