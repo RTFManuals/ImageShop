@@ -603,6 +603,23 @@ export default function App() {
     ctx.globalAlpha = 1;
   };
 
+  const isPointInPolygon = (x: number, y: number, polygon: { x: number; y: number }[]): boolean => {
+    let inside = false;
+    const n = polygon.length;
+    
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      
+      const intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      
+      if (intersect) inside = !inside;
+    }
+    
+    return inside;
+  };
+
   const extractContourFromMask = (maskCanvas: HTMLCanvasElement): { x: number; y: number }[] => {
     const maskCtx = maskCanvas.getContext('2d')!;
     const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight);
@@ -1172,11 +1189,42 @@ export default function App() {
     }
 
     if (tool === 'lasso' && selectionPathRef.current && selectionPathRef.current.length > 2) {
+      const path = selectionPathRef.current;
+      
+      // Calculate bounding box
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      selectionPathRef.current.forEach(p => {
+      path.forEach(p => {
         minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
         minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
       });
+      
+      // Create selection mask using point-in-polygon algorithm
+      const maskCanvas = createCanvas(canvasWidth, canvasHeight);
+      const maskCtx = maskCanvas.getContext('2d')!;
+      const maskData = maskCtx.createImageData(canvasWidth, canvasHeight);
+      
+      // Check each pixel in bounding box
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          if (isPointInPolygon(x, y, path)) {
+            const idx = (y * canvasWidth + x) * 4;
+            maskData.data[idx] = 255;     // R
+            maskData.data[idx + 1] = 255; // G
+            maskData.data[idx + 2] = 255; // B
+            maskData.data[idx + 3] = 255; // A
+          }
+        }
+      }
+      
+      maskCtx.putImageData(maskData, 0, 0);
+      
+      // Extract contour from mask
+      const contour = extractContourFromMask(maskCanvas);
+      setSelectionContour(contour);
+      
+      // Store selection mask globally
+      (window as any).__selectionMask = maskCanvas;
+      
       setSelection({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
       setSelectionPath(null);
       selectionPathRef.current = null;
