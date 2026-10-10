@@ -319,35 +319,49 @@ export default function App() {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
 
-    // Selection marching ants
+    // Selection marching ants (Photoshop-style)
     if (selection) {
       const mask = (window as any).__selectionMask as HTMLCanvasElement | undefined;
       const contour = selectionContour;
       
       if (mask && contour && contour.length > 0) {
-        // Draw marching ants along the contour
+        // Draw marching ants along the contour (dual color for visibility)
         const time = Math.floor(Date.now() / 100);
-        const dotSize = 1;
         const patternLength = 8; // 4 black + 4 white
         
+        // First pass: black dots
         contour.forEach((point, index) => {
           const patternPos = (index + time) % patternLength;
-          const isBlack = patternPos < 4;
-          
-          ctx.fillStyle = isBlack ? '#000000' : '#ffffff';
-          ctx.fillRect(point.x, point.y, dotSize, dotSize);
+          if (patternPos < 4) {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(point.x, point.y, 1, 1);
+          }
+        });
+        
+        // Second pass: white dots (offset)
+        contour.forEach((point, index) => {
+          const patternPos = (index + time) % patternLength;
+          if (patternPos >= 4) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(point.x, point.y, 1, 1);
+          }
         });
       } else if (selection) {
-        // Fallback: draw marching ants on bounding box if no contour
+        // Fallback: draw marching ants on bounding box (Photoshop-style)
         const time = Date.now() / 100;
-        ctx.strokeStyle = '#000';
+        
+        // Black border
+        ctx.strokeStyle = '#000000';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.lineDashOffset = time % 8;
         ctx.strokeRect(selection.x + 0.5, selection.y + 0.5, selection.w, selection.h);
-        ctx.strokeStyle = '#fff';
+        
+        // White border (offset)
+        ctx.strokeStyle = '#ffffff';
         ctx.lineDashOffset = (time + 4) % 8;
         ctx.strokeRect(selection.x + 0.5, selection.y + 0.5, selection.w, selection.h);
+        
         ctx.setLineDash([]);
         ctx.lineDashOffset = 0;
       }
@@ -1068,24 +1082,40 @@ export default function App() {
             h: Math.abs(pos.y - selectionStart.y),
           };
           setSelection(sel);
-          // Draw preview on overlay
+          // Draw preview on overlay (Photoshop-style)
           const overlay = cursorOverlayRef.current;
           if (overlay) {
             const octx = overlay.getContext('2d')!;
             octx.clearRect(0, 0, overlay.width, overlay.height);
-            octx.strokeStyle = '#fff';
+            
+            // Darken area outside selection
+            octx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            octx.fillRect(0, 0, overlay.width, sel.y);
+            octx.fillRect(0, sel.y + sel.h, overlay.width, overlay.height - sel.y - sel.h);
+            octx.fillRect(0, sel.y, sel.x, sel.h);
+            octx.fillRect(sel.x + sel.w, sel.y, overlay.width - sel.x - sel.w, sel.h);
+            
+            // Selection border with dual color (Photoshop-style)
+            octx.strokeStyle = '#ffffff';
             octx.lineWidth = 1;
             octx.setLineDash([4, 4]);
             octx.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w, sel.h);
-            octx.strokeStyle = '#000';
+            octx.strokeStyle = '#000000';
             octx.lineDashOffset = 4;
             octx.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w, sel.h);
             octx.setLineDash([]);
             octx.lineDashOffset = 0;
-            // Show dimensions
-            octx.fillStyle = '#4a90d9';
-            octx.font = '10px sans-serif';
-            octx.fillText(`${sel.w} × ${sel.h}`, pos.x + 10, pos.y - 5);
+            
+            // Dimension label with background
+            const label = `${Math.round(sel.w)} × ${Math.round(sel.h)}`;
+            octx.font = '11px sans-serif';
+            const metrics = octx.measureText(label);
+            const labelX = pos.x + 15;
+            const labelY = pos.y - 8;
+            octx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            octx.fillRect(labelX - 2, labelY - 10, metrics.width + 4, 14);
+            octx.fillStyle = '#ffffff';
+            octx.fillText(label, labelX, labelY);
           }
           renderComposite();
         }
@@ -1099,44 +1129,65 @@ export default function App() {
             h: Math.abs(pos.y - selectionStart.y),
           };
           setSelection(sel);
-          // Draw ellipse preview on overlay
+          // Draw ellipse preview on overlay (Photoshop-style)
           const overlay = cursorOverlayRef.current;
           if (overlay) {
             const octx = overlay.getContext('2d')!;
             octx.clearRect(0, 0, overlay.width, overlay.height);
+            
+            // Darken area outside ellipse
+            octx.save();
+            octx.beginPath();
+            octx.rect(0, 0, overlay.width, overlay.height);
             const cx = sel.x + sel.w / 2;
             const cy = sel.y + sel.h / 2;
             const rx = sel.w / 2;
             const ry = sel.h / 2;
-            octx.strokeStyle = '#fff';
+            octx.ellipse(cx, cy, Math.max(0, rx), Math.max(0, ry), 0, 0, Math.PI * 2);
+            octx.clip('evenodd');
+            octx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            octx.fillRect(0, 0, overlay.width, overlay.height);
+            octx.restore();
+            
+            // Ellipse border with dual color (Photoshop-style)
+            octx.strokeStyle = '#ffffff';
             octx.lineWidth = 1;
             octx.setLineDash([4, 4]);
             octx.beginPath();
             octx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
             octx.stroke();
-            octx.strokeStyle = '#000';
+            octx.strokeStyle = '#000000';
             octx.lineDashOffset = 4;
             octx.beginPath();
             octx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
             octx.stroke();
             octx.setLineDash([]);
             octx.lineDashOffset = 0;
-            // Show dimensions
-            octx.fillStyle = '#4a90d9';
-            octx.font = '10px sans-serif';
-            octx.fillText(`${Math.round(sel.w)} × ${Math.round(sel.h)}`, pos.x + 10, pos.y - 5);
+            
+            // Dimension label with background
+            const label = `${Math.round(sel.w)} × ${Math.round(sel.h)}`;
+            octx.font = '11px sans-serif';
+            const metrics = octx.measureText(label);
+            const labelX = pos.x + 15;
+            const labelY = pos.y - 8;
+            octx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            octx.fillRect(labelX - 2, labelY - 10, metrics.width + 4, 14);
+            octx.fillStyle = '#ffffff';
+            octx.fillText(label, labelX, labelY);
           }
           renderComposite();
         }
         break;
       case 'polygonal-lasso':
         if (selectionPathRef.current && selectionPathRef.current.length > 0) {
-          // Draw polygon preview on overlay
+          // Draw polygon preview on overlay (Photoshop-style)
           const overlay = cursorOverlayRef.current;
           if (overlay) {
             const octx = overlay.getContext('2d')!;
             octx.clearRect(0, 0, overlay.width, overlay.height);
-            octx.strokeStyle = '#fff';
+            
+            // Black line
+            octx.strokeStyle = '#000000';
             octx.lineWidth = 1;
             octx.setLineDash([3, 3]);
             octx.beginPath();
@@ -1144,11 +1195,24 @@ export default function App() {
             selectionPathRef.current.forEach(p => octx.lineTo(p.x, p.y));
             octx.lineTo(pos.x, pos.y);
             octx.stroke();
+            
+            // White line (offset)
+            octx.strokeStyle = '#ffffff';
+            octx.lineDashOffset = 3;
+            octx.beginPath();
+            octx.moveTo(selectionPathRef.current[0].x, selectionPathRef.current[0].y);
+            selectionPathRef.current.forEach(p => octx.lineTo(p.x, p.y));
+            octx.lineTo(pos.x, pos.y);
+            octx.stroke();
             octx.setLineDash([]);
-            // Draw points
+            octx.lineDashOffset = 0;
+            
+            // Draw points with dual color
             selectionPathRef.current.forEach(p => {
-              octx.fillStyle = '#fff';
+              octx.fillStyle = '#000000';
               octx.fillRect(p.x - 2, p.y - 2, 4, 4);
+              octx.fillStyle = '#ffffff';
+              octx.fillRect(p.x - 1, p.y - 1, 2, 2);
             });
           }
         }
@@ -1158,12 +1222,14 @@ export default function App() {
           const newPath = [...selectionPathRef.current, pos];
           selectionPathRef.current = newPath;
           setSelectionPath(newPath);
-          // Draw lasso path on overlay
+          // Draw lasso path on overlay (Photoshop-style)
           const overlay = cursorOverlayRef.current;
           if (overlay && newPath.length > 0) {
             const octx = overlay.getContext('2d')!;
             octx.clearRect(0, 0, overlay.width, overlay.height);
-            octx.strokeStyle = '#fff';
+            
+            // Black line
+            octx.strokeStyle = '#000000';
             octx.lineWidth = 1;
             octx.setLineDash([3, 3]);
             octx.beginPath();
@@ -1171,7 +1237,17 @@ export default function App() {
             newPath.forEach(p => octx.lineTo(p.x, p.y));
             octx.lineTo(pos.x, pos.y);
             octx.stroke();
+            
+            // White line (offset)
+            octx.strokeStyle = '#ffffff';
+            octx.lineDashOffset = 3;
+            octx.beginPath();
+            octx.moveTo(newPath[0].x, newPath[0].y);
+            newPath.forEach(p => octx.lineTo(p.x, p.y));
+            octx.lineTo(pos.x, pos.y);
+            octx.stroke();
             octx.setLineDash([]);
+            octx.lineDashOffset = 0;
           }
         }
         break;
@@ -1293,29 +1369,51 @@ export default function App() {
     if (!isDrawing || !['line', 'rectangle', 'ellipse', 'gradient', 'lasso', 'select', 'crop'].includes(tool)) {
       ctx.clearRect(0, 0, overlay.width, overlay.height);
     }
-    // Draw brush circle for brush-like tools
+    // Draw brush circle for brush-like tools (Photoshop-style dual color)
     if (['brush', 'eraser', 'blur-tool', 'sharpen-tool', 'dodge', 'burn', 'smudge', 'clone'].includes(tool) && !isDrawing) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      const radius = brushSize / 2;
+      
+      // Outer black circle (shadow)
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.setLineDash([2, 2]);
+      
+      // Inner white circle (for visibility on dark backgrounds)
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+      ctx.arc(pos.x + 1, pos.y + 1, radius, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.setLineDash([]);
+      
+      // Center dot
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(pos.x - 0.5, pos.y - 0.5, 1, 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(pos.x + 0.5, pos.y + 0.5, 1, 1);
     }
-    // Crosshair
+    
+    // Crosshair (Photoshop-style with dual color for visibility)
     if (!['hand', 'move', 'zoom', 'crop'].includes(tool)) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = 0.5;
+      // Black crosshair
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(pos.x - 12, pos.y); ctx.lineTo(pos.x - 4, pos.y);
       ctx.moveTo(pos.x + 4, pos.y); ctx.lineTo(pos.x + 12, pos.y);
       ctx.moveTo(pos.x, pos.y - 12); ctx.lineTo(pos.x, pos.y - 4);
       ctx.moveTo(pos.x, pos.y + 4); ctx.lineTo(pos.x, pos.y + 12);
+      ctx.stroke();
+      
+      // White crosshair (offset by 1px for contrast)
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pos.x - 11, pos.y + 1); ctx.lineTo(pos.x - 5, pos.y + 1);
+      ctx.moveTo(pos.x + 5, pos.y + 1); ctx.lineTo(pos.x + 13, pos.y + 1);
+      ctx.moveTo(pos.x + 1, pos.y - 11); ctx.lineTo(pos.x + 1, pos.y - 5);
+      ctx.moveTo(pos.x + 1, pos.y + 5); ctx.lineTo(pos.x + 1, pos.y + 13);
       ctx.stroke();
     }
     // Clone source indicator
