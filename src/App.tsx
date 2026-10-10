@@ -205,7 +205,7 @@ export default function App() {
   }, []);
 
   // Render composite
-  const renderComposite = useCallback(() => {
+  const renderComposite = () => {
     const mainCanvas = mainCanvasRef.current;
     if (!mainCanvas) return;
     const ctx = mainCanvas.getContext('2d')!;
@@ -291,7 +291,7 @@ export default function App() {
 
     // Update navigator
     updateNavigator();
-  }, [layers, canvasWidth, canvasHeight, selection, transform]);
+  };
 
   const updateNavigator = () => {
     const navCanvas = navigatorCanvasRef.current;
@@ -407,7 +407,7 @@ export default function App() {
 
   useEffect(() => {
     renderComposite();
-  }, [renderComposite]);
+  }, [layers, canvasWidth, canvasHeight, selection, transform]);
 
   const pushHistory = (currentLayers: Layer[], currentActiveId: string) => {
     const state = saveHistoryState(currentLayers, currentActiveId);
@@ -1172,10 +1172,6 @@ export default function App() {
   };
 
   // Re-render when layers change
-  useEffect(() => {
-    renderComposite();
-  }, [layers]);
-
   const mergeDown = (id: string) => {
     const idx = layers.findIndex(l => l.id === id);
     if (idx <= 0) return;
