@@ -940,8 +940,13 @@ export default function App() {
         setLastPos(pos);
         break;
       case 'zoom':
-        if (e.shiftKey) setZoom(z => Math.max(0.1, z - 0.25));
-        else setZoom(z => Math.min(32, z * 1.5));
+        if (e.altKey) {
+          // Alt+click = zoom out (Photoshop-style)
+          setZoom(z => Math.max(0.1, z / 1.5));
+        } else {
+          // Click = zoom in
+          setZoom(z => Math.min(32, z * 1.5));
+        }
         break;
       case 'blur-tool':
       case 'sharpen-tool':
@@ -2972,34 +2977,46 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [historyIndex, history, layers, activeLayerId, selection, fgColor, bgColor, transform, showTextDialog, showFilters, showNewDialog, showResizeDialog]);
 
+  // Порядок инструментов как в Photoshop CC
   const tools: { id: Tool; label: string; shortcut: string; group?: string }[] = [
+    // Row 1: Selection & Movement
     { id: 'move', label: 'Move Tool', shortcut: 'V', group: 'A' },
     { id: 'select', label: 'Rectangular Marquee', shortcut: 'M', group: 'A' },
     { id: 'ellipse-select', label: 'Elliptical Marquee', shortcut: '', group: 'A' },
     { id: 'lasso', label: 'Lasso Tool', shortcut: 'L', group: 'A' },
     { id: 'polygonal-lasso', label: 'Polygonal Lasso', shortcut: '', group: 'A' },
-    { id: 'magic-wand', label: 'Magic Wand', shortcut: 'W', group: 'A' },
-    { id: 'quick-selection', label: 'Quick Selection', shortcut: '', group: 'A' },
+    { id: 'quick-selection', label: 'Quick Selection', shortcut: 'W', group: 'A' },
+    { id: 'magic-wand', label: 'Magic Wand', shortcut: '', group: 'A' },
     { id: 'crop', label: 'Crop Tool', shortcut: 'C', group: 'A' },
+    
+    // Row 2: Retouching & Painting
     { id: 'eyedropper', label: 'Eyedropper', shortcut: 'I', group: 'B' },
+    { id: 'healing-brush', label: 'Spot Healing Brush', shortcut: 'J', group: 'B' },
     { id: 'brush', label: 'Brush Tool', shortcut: 'B', group: 'B' },
     { id: 'clone', label: 'Clone Stamp', shortcut: 'S', group: 'B' },
-    { id: 'healing-brush', label: 'Healing Brush', shortcut: 'J', group: 'B' },
     { id: 'eraser', label: 'Eraser Tool', shortcut: 'E', group: 'B' },
-    { id: 'blur-tool', label: 'Blur Tool', shortcut: '', group: 'B' },
-    { id: 'sharpen-tool', label: 'Sharpen Tool', shortcut: '', group: 'B' },
-    { id: 'dodge', label: 'Dodge Tool', shortcut: 'O', group: 'B' },
-    { id: 'burn', label: 'Burn Tool', shortcut: '', group: 'B' },
-    { id: 'smudge', label: 'Smudge Tool', shortcut: '', group: 'B' },
-    { id: 'fill', label: 'Paint Bucket', shortcut: 'G', group: 'C' },
-    { id: 'gradient', label: 'Gradient Tool', shortcut: '', group: 'C' },
-    { id: 'text', label: 'Horizontal Type', shortcut: 'T', group: 'C' },
-    { id: 'pen', label: 'Pen Tool', shortcut: 'P', group: 'C' },
-    { id: 'line', label: 'Line Tool', shortcut: 'U', group: 'D' },
-    { id: 'rectangle', label: 'Rectangle Tool', shortcut: 'R', group: 'D' },
-    { id: 'ellipse', label: 'Ellipse Tool', shortcut: '', group: 'D' },
-    { id: 'hand', label: 'Hand Tool', shortcut: 'H', group: 'E' },
-    { id: 'zoom', label: 'Zoom Tool', shortcut: 'Z', group: 'E' },
+    
+    // Row 3: Blurring & Sharpening
+    { id: 'blur-tool', label: 'Blur Tool', shortcut: '', group: 'C' },
+    { id: 'sharpen-tool', label: 'Sharpen Tool', shortcut: '', group: 'C' },
+    { id: 'smudge', label: 'Smudge Tool', shortcut: '', group: 'C' },
+    { id: 'dodge', label: 'Dodge Tool', shortcut: 'O', group: 'C' },
+    { id: 'burn', label: 'Burn Tool', shortcut: '', group: 'C' },
+    
+    // Row 4: Fill & Text
+    { id: 'gradient', label: 'Gradient Tool', shortcut: 'G', group: 'D' },
+    { id: 'fill', label: 'Paint Bucket', shortcut: '', group: 'D' },
+    { id: 'text', label: 'Horizontal Type', shortcut: 'T', group: 'D' },
+    { id: 'pen', label: 'Pen Tool', shortcut: 'P', group: 'D' },
+    
+    // Row 5: Shapes
+    { id: 'rectangle', label: 'Rectangle Tool', shortcut: 'U', group: 'E' },
+    { id: 'ellipse', label: 'Ellipse Tool', shortcut: '', group: 'E' },
+    { id: 'line', label: 'Line Tool', shortcut: '', group: 'E' },
+    
+    // Row 6: Navigation
+    { id: 'hand', label: 'Hand Tool', shortcut: 'H', group: 'F' },
+    { id: 'zoom', label: 'Zoom Tool', shortcut: 'Z', group: 'F' },
   ];
 
 
@@ -3259,8 +3276,22 @@ export default function App() {
                   height={canvasHeight}
                   className="shadow-2xl"
                   style={{ imageRendering: zoom > 4 ? 'pixelated' : 'auto', cursor: tool === 'hand' ? 'grab' : tool === 'move' ? 'move' : tool === 'zoom' ? 'zoom-in' : tool === 'text' ? 'text' : tool === 'eyedropper' ? 'crosshair' : tool === 'crop' ? 'crosshair' : 'none' }}
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
+                  onMouseDown={(e) => {
+                    // Update zoom cursor based on Alt key
+                    if (tool === 'zoom') {
+                      const canvas = e.currentTarget;
+                      canvas.style.cursor = e.altKey ? 'zoom-out' : 'zoom-in';
+                    }
+                    handleMouseDown(e);
+                  }}
+                  onMouseMove={(e) => {
+                    // Update zoom cursor dynamically
+                    if (tool === 'zoom') {
+                      const canvas = e.currentTarget;
+                      canvas.style.cursor = e.altKey ? 'zoom-out' : 'zoom-in';
+                    }
+                    handleMouseMove(e);
+                  }}
                   onMouseUp={handleMouseUp}
                   onMouseLeave={() => { if (isDrawing && !['brush', 'eraser', 'blur-tool', 'sharpen-tool', 'dodge', 'burn', 'smudge'].includes(tool)) { setIsDrawing(false); pushHistory(layers, activeLayerId); } }}
                 />
