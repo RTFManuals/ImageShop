@@ -5,3 +5,4 @@ export * from './commands';
 export * from './tools';
 export * from './selection';
 export * from './rendering';
+export * from './layers';

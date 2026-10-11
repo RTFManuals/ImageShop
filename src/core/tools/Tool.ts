@@ -35,6 +35,7 @@ export interface ToolContext {
   
   // Selection access
   getSelection(): any;
+  setSelection(selection: any): void;
   
   // Viewport access
   getViewport(): any;
