@@ -61,21 +61,28 @@ export class DocumentHistoryManager {
    * Undo the last command.
    * Returns the document state before the last command.
    * 
-   * @param currentDocument - The current document state (should be the result of last execute)
+   * @param currentDocument - The current document state (must match the last executed state)
    * @returns The document state before the last command, or null if nothing to undo
+   * @throws Error if current document doesn't match expected state
    */
   undo(currentDocument: Document): Document | null {
-    const entry = this.undoStack.pop();
-    if (!entry) {
+    if (this.undoStack.length === 0) {
       return null;
     }
 
-    // Verify current document matches expected state
-    // This is a safety check - in production, we trust the state
-    // but this helps catch bugs during development
+    const entry = this.undoStack[this.undoStack.length - 1];
+
+    // CRITICAL: Verify current document matches expected state
+    // If mismatch, reject undo to prevent restoring stale snapshots
     if (entry.documentAfter !== currentDocument) {
-      console.warn('Document state mismatch during undo - using stored state');
+      throw new Error(
+        'Undo rejected: current document state does not match expected history state. ' +
+        'This indicates external document modification or state desynchronization.'
+      );
     }
+
+    // Pop from undo stack
+    this.undoStack.pop();
 
     // Store in redo stack
     this.redoStack.push(entry);
@@ -88,19 +95,28 @@ export class DocumentHistoryManager {
    * Redo the last undone command.
    * Returns the document state after the command.
    * 
-   * @param currentDocument - The current document state
+   * @param currentDocument - The current document state (must match the last undone state)
    * @returns The document state after the command, or null if nothing to redo
+   * @throws Error if current document doesn't match expected state
    */
   redo(currentDocument: Document): Document | null {
-    const entry = this.redoStack.pop();
-    if (!entry) {
+    if (this.redoStack.length === 0) {
       return null;
     }
 
-    // Verify current document matches expected state
+    const entry = this.redoStack[this.redoStack.length - 1];
+
+    // CRITICAL: Verify current document matches expected state
+    // If mismatch, reject redo to prevent restoring stale snapshots
     if (entry.documentBefore !== currentDocument) {
-      console.warn('Document state mismatch during redo - using stored state');
+      throw new Error(
+        'Redo rejected: current document state does not match expected history state. ' +
+        'This indicates external document modification or state desynchronization.'
+      );
     }
+
+    // Pop from redo stack
+    this.redoStack.pop();
 
     // Store back in undo stack
     this.undoStack.push(entry);
@@ -143,6 +159,30 @@ export class DocumentHistoryManager {
   clear(): void {
     this.undoStack = [];
     this.redoStack = [];
+  }
+
+  /**
+   * Invalidate history when document is externally replaced.
+   * This should be called when the document is set directly (not through execute).
+   * 
+   * @param reason - Optional reason for invalidation (for logging)
+   */
+  invalidate(reason: string = 'External document replacement'): void {
+    if (this.undoStack.length > 0 || this.redoStack.length > 0) {
+      console.warn(`History invalidated: ${reason}. Clearing ${this.undoStack.length} undo and ${this.redoStack.length} redo entries.`);
+      this.clear();
+    }
+  }
+
+  /**
+   * Get the expected current document state based on history.
+   * Returns the documentAfter of the last executed command, or null if history is empty.
+   */
+  getExpectedCurrentDocument(): Document | null {
+    if (this.undoStack.length === 0) {
+      return null;
+    }
+    return this.undoStack[this.undoStack.length - 1].documentAfter;
   }
 
   /**

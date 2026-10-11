@@ -1,4 +1,5 @@
 import { BaseTool, EditorPointerEvent, ToolContext } from '../../core/tools/Tool';
+import { PaintStrokeCommand } from '../../core/commands/commands/PaintStrokeCommand';
 
 export interface StrokePoint {
   x: number;
@@ -106,9 +107,17 @@ export class BrushTool extends BaseTool {
       return;
     }
 
-    // TODO: Create PaintStrokeCommand and execute through unified pipeline
-    // For now, directly modify the layer (temporary solution)
-    // This will be replaced with proper command integration
+    // Create PaintStrokeCommand and execute through unified pipeline
+    const command = new PaintStrokeCommand(activeLayer.id, {
+      points: this.strokePoints,
+      color: this.color,
+      size: this.size,
+      opacity: this.opacity,
+      hardness: this.hardness,
+      mode: 'brush',
+    });
+
+    context.executeCommand(command);
     
     this.strokePoints = [];
     context.requestRender();

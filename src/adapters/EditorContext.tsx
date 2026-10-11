@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef, useCallback, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback } from 'react';
 import { Document } from '../core/document';
-import { DocumentHistoryManager, DocumentCommand } from '../core/commands';
+import { DocumentCommand } from '../core/commands';
 import { ToolRegistry, ToolManager, ToolContext, ToolContextProvider } from '../core/tools';
 import { Selection } from '../core/selection';
 import { ViewportImpl } from '../core/rendering';
@@ -14,11 +14,11 @@ import { LassoTool } from '../tools/selection/LassoTool';
 import { MagicWandTool } from '../tools/selection/MagicWandTool';
 import { MaskPaintTool } from '../tools/mask';
 import { SpotHealingBrushTool, CloneStampTool } from '../tools/retouch';
+import { useEditorStore } from '../state/editorStore';
 
 interface EditorContextValue {
   document: Document | null;
   setDocument: (doc: Document | null) => void;
-  historyManager: DocumentHistoryManager;
   toolRegistry: ToolRegistry;
   toolManager: ToolManager;
   activeToolId: string;
@@ -46,38 +46,25 @@ export function useEditorContext(): EditorContextValue {
 
 interface EditorProviderProps {
   children: React.ReactNode;
-  initialDocument?: Document | null;
 }
 
-export function EditorProvider({ children, initialDocument = null }: EditorProviderProps) {
-  const [document, setDocumentState] = useState<Document | null>(initialDocument);
-  const [activeToolId, setActiveToolId] = useState<string>('move');
-  const [selection, setSelectionState] = useState<Selection | null>(null);
-  const [zoom, setZoom] = useState<number>(1);
-  const [renderTrigger, setRenderTrigger] = useState(0);
-
-  const historyManagerRef = useRef(new DocumentHistoryManager(60));
+export function EditorProvider({ children }: EditorProviderProps) {
+  // Use Zustand store as the single source of truth
+  const store = useEditorStore();
+  
   const toolRegistryRef = useRef(new ToolRegistry());
   const viewportRef = useRef(new ViewportImpl(800, 600));
   
-  // Synchronous refs - updated immediately, not via useEffect
-  const documentRef = useRef(document);
-  const selectionRef = useRef(selection);
+  // Synchronous refs for tool context
+  const documentRef = useRef(store.document);
+  const selectionRef = useRef(store.selection);
   
-  // Update refs synchronously during render (before useEffect)
-  documentRef.current = document;
-  selectionRef.current = selection;
+  // Update refs synchronously during render
+  documentRef.current = store.document;
+  selectionRef.current = store.selection;
 
-  // Wrapper functions that update both state and refs synchronously
-  const setDocument = useCallback((doc: Document | null) => {
-    documentRef.current = doc;
-    setDocumentState(doc);
-  }, []);
-
-  const setSelection = useCallback((sel: Selection | null) => {
-    selectionRef.current = sel;
-    setSelectionState(sel);
-  }, []);
+  // Render trigger for forcing updates
+  const [renderTrigger, setRenderTrigger] = React.useState(0);
 
   // Initialize tools
   useEffect(() => {
@@ -99,77 +86,28 @@ export function EditorProvider({ children, initialDocument = null }: EditorProvi
     console.log('✅ Tools registered:', registry.getAll().map(t => t.id));
   }, []);
 
-  // Execute command through unified pipeline
-  const executeCommand = useCallback((command: DocumentCommand) => {
-    const currentDoc = documentRef.current;
-    if (!currentDoc) {
-      console.error('Cannot execute command: no document');
-      return;
-    }
-
-    try {
-      // Execute command through history manager
-      const newDocument = historyManagerRef.current.execute(command, currentDoc);
-      
-      // Update document state
-      setDocument(newDocument);
-      
-      // Trigger render
-      setRenderTrigger(prev => prev + 1);
-    } catch (error) {
-      console.error('Command execution failed:', error);
-      // Don't update state or trigger render on failure
-    }
-  }, [setDocument]);
-
-  // Undo last command
-  const undo = useCallback(() => {
-    const currentDoc = documentRef.current;
-    if (!currentDoc) {
-      return;
-    }
-
-    const previousDocument = historyManagerRef.current.undo(currentDoc);
-    if (previousDocument) {
-      setDocument(previousDocument);
-      setRenderTrigger(prev => prev + 1);
-    }
-  }, [setDocument]);
-
-  // Redo last undone command
-  const redo = useCallback(() => {
-    const currentDoc = documentRef.current;
-    if (!currentDoc) {
-      return;
-    }
-
-    const nextDocument = historyManagerRef.current.redo(currentDoc);
-    if (nextDocument) {
-      setDocument(nextDocument);
-      setRenderTrigger(prev => prev + 1);
-    }
-  }, [setDocument]);
-
   // Create tool context provider - returns fresh context on every call
   const getToolContext = useCallback((): ToolContext => {
     return {
       getDocument: () => documentRef.current,
-      setDocument: (doc) => setDocument(doc),
+      setDocument: (doc) => store.setDocument(doc),
       getActiveLayer: () => {
         const doc = documentRef.current;
         if (!doc) return null;
         return doc.getActiveLayer() ?? null;
       },
       getSelection: () => selectionRef.current,
-      setSelection: (sel) => setSelection(sel),
+      setSelection: (sel) => store.setSelection(sel),
       getViewport: () => viewportRef.current,
-      executeCommand: (command: DocumentCommand) => executeCommand(command),
+      executeCommand: (command: DocumentCommand) => {
+        store.executeCommand(command);
+        setRenderTrigger(prev => prev + 1);
+      },
       requestRender: () => {
-        // Trigger re-render for visual updates
         setRenderTrigger(prev => prev + 1);
       },
     };
-  }, [setDocument, setSelection, executeCommand]);
+  }, [store]);
 
   // Create ToolManager once with the context provider
   const toolManagerRef = useRef<ToolManager | null>(null);
@@ -182,25 +120,24 @@ export function EditorProvider({ children, initialDocument = null }: EditorProvi
 
   // Sync active tool
   useEffect(() => {
-    toolManagerRef.current?.setActiveTool(activeToolId);
-  }, [activeToolId]);
+    toolManagerRef.current?.setActiveTool(store.activeToolId);
+  }, [store.activeToolId]);
 
   const value: EditorContextValue = {
-    document,
-    setDocument,
-    historyManager: historyManagerRef.current,
+    document: store.document,
+    setDocument: store.setDocument,
     toolRegistry: toolRegistryRef.current,
     toolManager: toolManagerRef.current!,
-    activeToolId,
-    setActiveTool: setActiveToolId,
-    selection,
-    setSelection,
+    activeToolId: store.activeToolId,
+    setActiveTool: store.setActiveTool,
+    selection: store.selection,
+    setSelection: store.setSelection,
     viewport: viewportRef.current,
-    zoom,
-    setZoom,
-    executeCommand,
-    undo,
-    redo,
+    zoom: store.zoom,
+    setZoom: store.setZoom,
+    executeCommand: store.executeCommand,
+    undo: store.undo,
+    redo: store.redo,
     renderTrigger,
   };
 
