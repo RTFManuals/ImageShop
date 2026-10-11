@@ -1,0 +1,1 @@
+export { MaskPaintTool } from './MaskPaintTool';

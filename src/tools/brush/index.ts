@@ -1,0 +1,1 @@
+export { BrushTool } from './BrushTool';
