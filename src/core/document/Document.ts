@@ -117,6 +117,19 @@ export class Document {
   }
 
   updateLayer(layerId: string, updates: Partial<Layer>): Document {
+    // Validate layer exists
+    if (!this._document.layers.some(l => l.id === layerId)) {
+      throw new Error(`Layer with id "${layerId}" not found`);
+    }
+
+    // Prevent changing immutable properties
+    if ('id' in updates && updates.id !== layerId) {
+      throw new Error('Cannot change layer ID through updateLayer');
+    }
+    if ('type' in updates) {
+      throw new Error('Cannot change layer type through updateLayer');
+    }
+
     return new Document({
       ...this._document,
       layers: this._document.layers.map(layer =>

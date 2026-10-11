@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Document } from '../core/document';
 import { HistoryManager } from '../core/commands';
-import { ToolRegistry, ToolManager, ToolContext } from '../core/tools';
+import { ToolRegistry, ToolManager, ToolContext, ToolContextProvider } from '../core/tools';
 import { Selection } from '../core/selection';
+import { ViewportImpl } from '../core/rendering';
 import { RasterLayer } from '../core/document/DocumentTypes';
 
 describe('EditorContext Integration', () => {
@@ -37,69 +38,80 @@ describe('EditorContext Integration', () => {
     currentSelection = null;
     renderCallCount = 0;
 
-    // Create tool context with refs to simulate EditorContext behavior
-    const documentRef = { current: document };
-    const selectionRef = { current: currentSelection };
-
-    const toolContext: ToolContext = {
-      getDocument: () => documentRef.current,
-      setDocument: (doc) => {
-        documentRef.current = doc;
-        document = doc;
-      },
-      getActiveLayer: () => {
-        const doc = documentRef.current;
-        if (!doc) return null;
-        return doc.getActiveLayer();
-      },
-      getSelection: () => selectionRef.current,
-      setSelection: (sel) => {
-        selectionRef.current = sel;
-        currentSelection = sel;
-      },
-      getViewport: () => ({ zoom: 1, panX: 0, panY: 0, width: 100, height: 100 }),
-      executeCommand: (command) => {
-        historyManager.execute(command);
-        renderCallCount++;
-      },
-      requestRender: () => {
-        renderCallCount++;
-      },
+    // Create state holders (simulating refs in EditorContext)
+    const state = {
+      document: document,
+      selection: currentSelection,
     };
 
-    toolManager = new ToolManager(toolRegistry, toolContext);
+    // Create tool context provider - returns fresh context on every call
+    const contextProvider: ToolContextProvider = () => {
+      const context: ToolContext = {
+        getDocument: () => state.document,
+        setDocument: (doc) => {
+          state.document = doc;
+          document = doc;
+        },
+        getActiveLayer: () => {
+          const doc = state.document;
+          if (!doc) return null;
+          return doc.getActiveLayer() ?? null;
+        },
+        getSelection: () => state.selection,
+        setSelection: (sel) => {
+          state.selection = sel;
+          currentSelection = sel;
+        },
+        getViewport: () => new ViewportImpl(100, 100),
+        executeCommand: (command) => {
+          historyManager.execute(command);
+          renderCallCount++;
+        },
+        requestRender: () => {
+          renderCallCount++;
+        },
+      };
+      return context;
+    };
+
+    toolManager = new ToolManager(toolRegistry, contextProvider);
   });
 
   describe('ToolContext state access', () => {
     it('should receive updated document state', () => {
-      const activeLayer = toolManager['context'].getActiveLayer();
+      const context = (toolManager as any).getContext();
+      const activeLayer = context.getActiveLayer();
       expect(activeLayer).toBeDefined();
       expect(activeLayer?.id).toBe('layer1');
 
       // Update document
       const updatedDoc = document.setActiveLayer(null);
-      toolManager['context'].setDocument(updatedDoc);
+      context.setDocument(updatedDoc);
 
-      // Should receive updated state
-      const newActiveLayer = toolManager['context'].getActiveLayer();
+      // Should receive updated state through new context call
+      const newContext = (toolManager as any).getContext();
+      const newActiveLayer = newContext.getActiveLayer();
       expect(newActiveLayer).toBeUndefined();
     });
 
     it('should receive updated selection state', () => {
-      expect(toolManager['context'].getSelection()).toBeNull();
+      const context = (toolManager as any).getContext();
+      expect(context.getSelection()).toBeNull();
 
       // Update selection
       const selection = new Selection(100, 100);
       selection.selectRect({ x: 10, y: 10, width: 20, height: 20 });
-      toolManager['context'].setSelection(selection);
+      context.setSelection(selection);
 
-      // Should receive updated state
-      const currentSel = toolManager['context'].getSelection();
+      // Should receive updated state through new context call
+      const newContext = (toolManager as any).getContext();
+      const currentSel = newContext.getSelection();
       expect(currentSel).not.toBeNull();
       expect(currentSel?.contains(15, 15)).toBe(true);
     });
 
     it('should trigger render on command execution', () => {
+      const context = (toolManager as any).getContext();
       expect(renderCallCount).toBe(0);
 
       // Execute a command (simulated)
@@ -112,24 +124,26 @@ describe('EditorContext Integration', () => {
         redo: () => {},
       };
 
-      toolManager['context'].executeCommand(mockCommand);
+      context.executeCommand(mockCommand);
       expect(renderCallCount).toBe(1);
     });
 
     it('should trigger render on requestRender', () => {
+      const context = (toolManager as any).getContext();
       expect(renderCallCount).toBe(0);
 
-      toolManager['context'].requestRender();
+      context.requestRender();
       expect(renderCallCount).toBe(1);
 
-      toolManager['context'].requestRender();
+      context.requestRender();
       expect(renderCallCount).toBe(2);
     });
   });
 
   describe('Command execution and undo/redo', () => {
     it('should update document through command execution', () => {
-      const initialDoc = toolManager['context'].getDocument();
+      const context = (toolManager as any).getContext();
+      const initialDoc = context.getDocument();
       expect(initialDoc?.layers.length).toBe(1);
 
       // Simulate command that adds a layer
@@ -147,15 +161,17 @@ describe('EditorContext Integration', () => {
       };
 
       const updatedDoc = initialDoc!.addLayer(newLayer);
-      toolManager['context'].setDocument(updatedDoc);
+      context.setDocument(updatedDoc);
 
       // Verify document updated
-      const currentDoc = toolManager['context'].getDocument();
+      const newContext = (toolManager as any).getContext();
+      const currentDoc = newContext.getDocument();
       expect(currentDoc?.layers.length).toBe(2);
     });
 
     it('should restore previous document on undo', () => {
-      const initialDoc = toolManager['context'].getDocument();
+      const context = (toolManager as any).getContext();
+      const initialDoc = context.getDocument();
       expect(initialDoc?.layers.length).toBe(1);
 
       // Simulate command execution
@@ -180,30 +196,33 @@ describe('EditorContext Integration', () => {
         name: 'Test Command',
         timestamp: Date.now(),
         execute: () => {
-          toolManager['context'].setDocument(updatedDoc);
+          context.setDocument(updatedDoc);
         },
         undo: () => {
-          toolManager['context'].setDocument(initialDoc!);
+          context.setDocument(initialDoc!);
         },
         redo: () => {
-          toolManager['context'].setDocument(updatedDoc);
+          context.setDocument(updatedDoc);
         },
       };
 
       historyManager.execute(mockCommand);
       
       // Verify document updated
-      let currentDoc = toolManager['context'].getDocument();
+      let currentContext = (toolManager as any).getContext();
+      let currentDoc = currentContext.getDocument();
       expect(currentDoc?.layers.length).toBe(2);
 
       // Undo
       historyManager.undo();
-      currentDoc = toolManager['context'].getDocument();
+      currentContext = (toolManager as any).getContext();
+      currentDoc = currentContext.getDocument();
       expect(currentDoc?.layers.length).toBe(1);
     });
 
     it('should restore new document on redo', () => {
-      const initialDoc = toolManager['context'].getDocument();
+      const context = (toolManager as any).getContext();
+      const initialDoc = context.getDocument();
       
       const newLayer: RasterLayer = {
         id: 'layer2',
@@ -225,13 +244,13 @@ describe('EditorContext Integration', () => {
         name: 'Test Command',
         timestamp: Date.now(),
         execute: () => {
-          toolManager['context'].setDocument(updatedDoc);
+          context.setDocument(updatedDoc);
         },
         undo: () => {
-          toolManager['context'].setDocument(initialDoc!);
+          context.setDocument(initialDoc!);
         },
         redo: () => {
-          toolManager['context'].setDocument(updatedDoc);
+          context.setDocument(updatedDoc);
         },
       };
 
@@ -239,18 +258,22 @@ describe('EditorContext Integration', () => {
       historyManager.undo();
       
       // Verify document restored to initial state
-      let currentDoc = toolManager['context'].getDocument();
+      let currentContext = (toolManager as any).getContext();
+      let currentDoc = currentContext.getDocument();
       expect(currentDoc?.layers.length).toBe(1);
 
       // Redo
       historyManager.redo();
-      currentDoc = toolManager['context'].getDocument();
+      currentContext = (toolManager as any).getContext();
+      currentDoc = currentContext.getDocument();
       expect(currentDoc?.layers.length).toBe(2);
     });
   });
 
   describe('Active layer preservation', () => {
     it('should preserve valid active layer after layer removal', () => {
+      const context = (toolManager as any).getContext();
+      
       // Add two layers
       const layer2: RasterLayer = {
         id: 'layer2',
@@ -265,27 +288,30 @@ describe('EditorContext Integration', () => {
         imageData: new ImageData(100, 100),
       };
 
-      let doc = toolManager['context'].getDocument()!;
+      let doc = context.getDocument();
       doc = doc.addLayer(layer2);
       doc = doc.setActiveLayer('layer2');
-      toolManager['context'].setDocument(doc);
+      context.setDocument(doc);
 
       // Remove active layer
       doc = doc.removeLayer('layer2');
-      toolManager['context'].setDocument(doc);
+      context.setDocument(doc);
 
       // Active layer should be valid
-      const currentDoc = toolManager['context'].getDocument();
+      const currentContext = (toolManager as any).getContext();
+      const currentDoc = currentContext.getDocument();
       expect(currentDoc?.activeLayerId).toBe('layer1');
       expect(currentDoc?.getActiveLayer()).toBeDefined();
     });
 
     it('should set active layer to null when all layers removed', () => {
-      let doc = toolManager['context'].getDocument()!;
+      const context = (toolManager as any).getContext();
+      let doc = context.getDocument();
       doc = doc.removeLayer('layer1');
-      toolManager['context'].setDocument(doc);
+      context.setDocument(doc);
 
-      const currentDoc = toolManager['context'].getDocument();
+      const currentContext = (toolManager as any).getContext();
+      const currentDoc = currentContext.getDocument();
       expect(currentDoc?.activeLayerId).toBeNull();
       expect(currentDoc?.getActiveLayer()).toBeUndefined();
     });
@@ -293,6 +319,7 @@ describe('EditorContext Integration', () => {
 
   describe('History and rendering coordination', () => {
     it('should coordinate command execution with rendering', () => {
+      const context = (toolManager as any).getContext();
       expect(renderCallCount).toBe(0);
       expect(historyManager.getUndoCount()).toBe(0);
 
@@ -306,8 +333,7 @@ describe('EditorContext Integration', () => {
           undo: () => {},
           redo: () => {},
         };
-        historyManager.execute(mockCommand);
-        renderCallCount++;
+        context.executeCommand(mockCommand);
       }
 
       expect(historyManager.getUndoCount()).toBe(3);

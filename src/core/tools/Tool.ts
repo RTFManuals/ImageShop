@@ -1,4 +1,6 @@
 // Tool System - Core Interfaces
+// Note: Using 'any' for ToolContext to maintain compatibility with existing tool implementations.
+// Full type safety will be achieved during tool migration in a future increment.
 
 export interface Point {
   x: number;

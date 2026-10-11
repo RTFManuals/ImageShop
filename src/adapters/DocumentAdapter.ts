@@ -49,14 +49,12 @@ export class DocumentAdapter {
       }
     }
 
-    // Note: Legacy Layer has clippingMask and groupId fields
-    // These are not yet supported in core Layer model
-    // TODO: Add clippingMask and groupId to core Layer when implementing layer groups
+    // Preserve clippingMask and groupId
     if (legacyLayer.clippingMask !== undefined) {
-      console.warn('clippingMask field not yet supported in core Layer model');
+      coreLayer.clippingMask = legacyLayer.clippingMask;
     }
     if (legacyLayer.groupId !== undefined) {
-      console.warn('groupId field not yet supported in core Layer model');
+      coreLayer.groupId = legacyLayer.groupId;
     }
 
     return coreLayer;
@@ -100,8 +98,13 @@ export class DocumentAdapter {
       }
     }
 
-    // Note: Legacy Layer doesn't have transform field
-    // Transform is handled separately if needed
+    // Preserve clippingMask and groupId
+    if (coreLayer.clippingMask !== undefined) {
+      legacyLayer.clippingMask = coreLayer.clippingMask;
+    }
+    if (coreLayer.groupId !== undefined) {
+      legacyLayer.groupId = coreLayer.groupId;
+    }
 
     return legacyLayer;
   }

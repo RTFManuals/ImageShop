@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback } from 'react';
 import { Document } from '../core/document';
 import { HistoryManager } from '../core/commands';
 import { ToolRegistry, ToolManager, ToolContext } from '../core/tools';
@@ -48,9 +48,9 @@ interface EditorProviderProps {
 }
 
 export function EditorProvider({ children }: EditorProviderProps) {
-  const [document, setDocument] = React.useState<Document | null>(null);
+  const [document, setDocumentState] = React.useState<Document | null>(null);
   const [activeToolId, setActiveToolId] = React.useState<string>('move');
-  const [selection, setSelection] = React.useState<Selection | null>(null);
+  const [selection, setSelectionState] = React.useState<Selection | null>(null);
   const [zoom, setZoom] = React.useState<number>(1);
   const [renderTrigger, setRenderTrigger] = React.useState(0);
 
@@ -58,18 +58,24 @@ export function EditorProvider({ children }: EditorProviderProps) {
   const toolRegistryRef = useRef(new ToolRegistry());
   const viewportRef = useRef(new ViewportImpl(800, 600));
   
-  // Use refs to avoid stale closures in ToolContext
+  // Synchronous refs - updated immediately, not via useEffect
   const documentRef = useRef(document);
   const selectionRef = useRef(selection);
   
-  // Keep refs in sync with state
-  React.useEffect(() => {
-    documentRef.current = document;
-  }, [document]);
-  
-  React.useEffect(() => {
-    selectionRef.current = selection;
-  }, [selection]);
+  // Update refs synchronously during render (before useEffect)
+  documentRef.current = document;
+  selectionRef.current = selection;
+
+  // Wrapper functions that update both state and refs synchronously
+  const setDocument = useCallback((doc: Document | null) => {
+    documentRef.current = doc;
+    setDocumentState(doc);
+  }, []);
+
+  const setSelection = useCallback((sel: Selection | null) => {
+    selectionRef.current = sel;
+    setSelectionState(sel);
+  }, []);
 
   // Initialize tools
   useEffect(() => {
@@ -91,50 +97,65 @@ export function EditorProvider({ children }: EditorProviderProps) {
     console.log('✅ Tools registered:', registry.getAll().map(t => t.id));
   }, []);
 
-  // Create tool context with refs to avoid stale closures
-  const toolContext: ToolContext = {
-    getDocument: () => documentRef.current,
-    setDocument: (doc) => setDocument(doc),
-    getActiveLayer: () => {
-      const doc = documentRef.current;
-      if (!doc) return null;
-      return doc.getActiveLayer();
-    },
-    getSelection: () => selectionRef.current,
-    setSelection: (sel) => setSelection(sel),
-    getViewport: () => viewportRef.current,
-    executeCommand: (command) => {
-      historyManagerRef.current.execute(command);
-      // Trigger re-render after command execution
-      setRenderTrigger(prev => prev + 1);
-    },
-    requestRender: () => {
-      // Trigger re-render for visual updates
-      setRenderTrigger(prev => prev + 1);
-    },
-  };
+  // Create tool context provider - returns fresh context on every call
+  const getToolContext = useCallback((): ToolContext => {
+    return {
+      getDocument: () => documentRef.current,
+      setDocument: (doc) => setDocument(doc),
+      getActiveLayer: () => {
+        const doc = documentRef.current;
+        if (!doc) return null;
+        return doc.getActiveLayer() ?? null;
+      },
+      getSelection: () => selectionRef.current,
+      setSelection: (sel) => setSelection(sel),
+      getViewport: () => viewportRef.current,
+      executeCommand: (command) => {
+        historyManagerRef.current.execute(command);
+        // Trigger re-render after command execution
+        setRenderTrigger(prev => prev + 1);
+      },
+      requestRender: () => {
+        // Trigger re-render for visual updates
+        setRenderTrigger(prev => prev + 1);
+      },
+    };
+  }, [setDocument, setSelection]);
 
-  const toolManagerRef = useRef(new ToolManager(toolRegistryRef.current, toolContext));
+  // Create ToolManager once with the context provider
+  const toolManagerRef = useRef<ToolManager | null>(null);
+  if (!toolManagerRef.current) {
+    toolManagerRef.current = new ToolManager(toolRegistryRef.current, getToolContext);
+  }
+  
+  // Update context provider on every render to ensure fresh state access
+  toolManagerRef.current.updateContextProvider(getToolContext);
 
   // Sync active tool
   useEffect(() => {
-    toolManagerRef.current.setActiveTool(activeToolId);
+    toolManagerRef.current?.setActiveTool(activeToolId);
   }, [activeToolId]);
 
-  const undo = () => {
-    historyManagerRef.current.undo();
-  };
+  const undo = useCallback(() => {
+    const command = historyManagerRef.current.undo();
+    if (command) {
+      setRenderTrigger(prev => prev + 1);
+    }
+  }, []);
 
-  const redo = () => {
-    historyManagerRef.current.redo();
-  };
+  const redo = useCallback(() => {
+    const command = historyManagerRef.current.redo();
+    if (command) {
+      setRenderTrigger(prev => prev + 1);
+    }
+  }, []);
 
   const value: EditorContextValue = {
     document,
     setDocument,
     historyManager: historyManagerRef.current,
     toolRegistry: toolRegistryRef.current,
-    toolManager: toolManagerRef.current,
+    toolManager: toolManagerRef.current!,
     activeToolId,
     setActiveTool: setActiveToolId,
     selection,

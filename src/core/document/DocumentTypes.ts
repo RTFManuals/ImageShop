@@ -30,6 +30,8 @@ export interface Layer {
   locked: boolean;
   transform?: LayerTransform;
   mask?: LayerMask;
+  clippingMask?: boolean;
+  groupId?: string;
 }
 
 export interface RasterLayer extends Layer {

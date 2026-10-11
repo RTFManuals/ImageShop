@@ -338,4 +338,82 @@ describe('Document Invariants', () => {
       expect(doc.getLayer('layer2')).toBeUndefined();
     });
   });
+
+  describe('Update Layer Validation', () => {
+    it('should throw when trying to change layer ID through updateLayer', () => {
+      const layer1: RasterLayer = {
+        id: 'layer1',
+        name: 'Layer 1',
+        type: 'raster',
+        visible: true,
+        opacity: 100,
+        blendMode: 'normal',
+        locked: false,
+        width: 100,
+        height: 100,
+        imageData: new ImageData(100, 100),
+      };
+
+      doc = doc.addLayer(layer1);
+      
+      // Try to update with different ID - should throw
+      expect(() => doc.updateLayer('layer1', { id: 'newId' } as any)).toThrow('Cannot change layer ID through updateLayer');
+    });
+
+    it('should throw when trying to change layer type through updateLayer', () => {
+      const layer1: RasterLayer = {
+        id: 'layer1',
+        name: 'Layer 1',
+        type: 'raster',
+        visible: true,
+        opacity: 100,
+        blendMode: 'normal',
+        locked: false,
+        width: 100,
+        height: 100,
+        imageData: new ImageData(100, 100),
+      };
+
+      doc = doc.addLayer(layer1);
+      
+      // Try to update type - should throw
+      expect(() => doc.updateLayer('layer1', { type: 'group' } as any)).toThrow('Cannot change layer type through updateLayer');
+    });
+
+    it('should throw when updating non-existent layer', () => {
+      expect(() => doc.updateLayer('nonexistent', { name: 'New Name' })).toThrow('Layer with id "nonexistent" not found');
+    });
+
+    it('should allow updating valid properties', () => {
+      const layer1: RasterLayer = {
+        id: 'layer1',
+        name: 'Layer 1',
+        type: 'raster',
+        visible: true,
+        opacity: 100,
+        blendMode: 'normal',
+        locked: false,
+        width: 100,
+        height: 100,
+        imageData: new ImageData(100, 100),
+      };
+
+      doc = doc.addLayer(layer1);
+      
+      const updatedDoc = doc.updateLayer('layer1', {
+        name: 'Updated Name',
+        opacity: 50,
+        visible: false,
+        locked: true,
+      });
+      
+      const updatedLayer = updatedDoc.getLayer('layer1');
+      expect(updatedLayer?.name).toBe('Updated Name');
+      expect(updatedLayer?.opacity).toBe(50);
+      expect(updatedLayer?.visible).toBe(false);
+      expect(updatedLayer?.locked).toBe(true);
+      expect(updatedLayer?.id).toBe('layer1'); // ID unchanged
+      expect(updatedLayer?.type).toBe('raster'); // Type unchanged
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { DocumentAdapter } from './DocumentAdapter';
 import { Document } from '../core/document';
 import { Layer as LegacyLayer } from '../types';
@@ -117,8 +117,8 @@ describe('DocumentAdapter - Complex Documents', () => {
     });
   });
 
-  describe('Unsupported features handling', () => {
-    it('should warn about clippingMask field', () => {
+  describe('Clipping mask and group preservation', () => {
+    it('should preserve clippingMask field through conversion', () => {
       const canvas = document.createElement('canvas');
       canvas.width = 100;
       canvas.height = 100;
@@ -134,17 +134,14 @@ describe('DocumentAdapter - Complex Documents', () => {
         clippingMask: true,
       };
 
-      // Should not throw, but should warn
-      const consoleSpy = vi.spyOn(console, 'warn');
       const coreLayer = DocumentAdapter.legacyToCore(legacyLayer, 100, 100);
-      
-      expect(consoleSpy).toHaveBeenCalledWith('clippingMask field not yet supported in core Layer model');
-      expect(coreLayer).toBeDefined();
-      
-      consoleSpy.mockRestore();
+      expect(coreLayer.clippingMask).toBe(true);
+
+      const convertedBack = DocumentAdapter.coreToLegacy(coreLayer);
+      expect(convertedBack.clippingMask).toBe(true);
     });
 
-    it('should warn about groupId field', () => {
+    it('should preserve groupId field through conversion', () => {
       const canvas = document.createElement('canvas');
       canvas.width = 100;
       canvas.height = 100;
@@ -160,17 +157,14 @@ describe('DocumentAdapter - Complex Documents', () => {
         groupId: 'group1',
       };
 
-      // Should not throw, but should warn
-      const consoleSpy = vi.spyOn(console, 'warn');
       const coreLayer = DocumentAdapter.legacyToCore(legacyLayer, 100, 100);
-      
-      expect(consoleSpy).toHaveBeenCalledWith('groupId field not yet supported in core Layer model');
-      expect(coreLayer).toBeDefined();
-      
-      consoleSpy.mockRestore();
+      expect(coreLayer.groupId).toBe('group1');
+
+      const convertedBack = DocumentAdapter.coreToLegacy(coreLayer);
+      expect(convertedBack.groupId).toBe('group1');
     });
 
-    it('should handle layer with both unsupported fields', () => {
+    it('should preserve both clippingMask and groupId through round-trip', () => {
       const canvas = document.createElement('canvas');
       canvas.width = 100;
       canvas.height = 100;
@@ -187,13 +181,13 @@ describe('DocumentAdapter - Complex Documents', () => {
         groupId: 'group1',
       };
 
-      const consoleSpy = vi.spyOn(console, 'warn');
       const coreLayer = DocumentAdapter.legacyToCore(legacyLayer, 100, 100);
-      
-      expect(consoleSpy).toHaveBeenCalledTimes(2);
-      expect(coreLayer).toBeDefined();
-      
-      consoleSpy.mockRestore();
+      expect(coreLayer.clippingMask).toBe(true);
+      expect(coreLayer.groupId).toBe('group1');
+
+      const convertedBack = DocumentAdapter.coreToLegacy(coreLayer);
+      expect(convertedBack.clippingMask).toBe(true);
+      expect(convertedBack.groupId).toBe('group1');
     });
   });
 
