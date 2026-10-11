@@ -28,6 +28,7 @@ export interface EditorKeyboardEvent {
 export interface ToolContext {
   // Document access
   getDocument(): any;
+  setDocument(document: any): void;
   
   // Layer access
   getActiveLayer(): any;
