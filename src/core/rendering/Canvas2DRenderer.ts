@@ -1,5 +1,6 @@
 import { Renderer, Viewport } from './Renderer';
 import { EditorDocument, RasterLayer } from '../document/DocumentTypes';
+import { Selection } from '../selection/Selection';
 
 export class Canvas2DRenderer implements Renderer {
   private canvas: HTMLCanvasElement | null = null;
@@ -14,7 +15,7 @@ export class Canvas2DRenderer implements Renderer {
     this.height = canvas.height;
   }
 
-  render(document: EditorDocument, viewport: Viewport): void {
+  render(document: EditorDocument, viewport: Viewport, selection?: Selection): void {
     if (!this.ctx || !this.canvas) {
       return;
     }
@@ -41,6 +42,11 @@ export class Canvas2DRenderer implements Renderer {
       if (layer.type === 'raster') {
         this.renderRasterLayer(ctx, layer as RasterLayer);
       }
+    }
+
+    // Рисуем выделение (marching ants)
+    if (selection && !selection.isEmpty()) {
+      this.renderSelection(ctx, selection);
     }
 
     ctx.restore();
@@ -117,6 +123,31 @@ export class Canvas2DRenderer implements Renderer {
     };
 
     return operations[blendMode] || 'source-over';
+  }
+
+  private renderSelection(ctx: CanvasRenderingContext2D, selection: Selection): void {
+    const bounds = selection.bounds;
+    if (bounds.width === 0 || bounds.height === 0) {
+      return;
+    }
+
+    // Marching ants animation
+    const time = Date.now() / 100;
+    const dashOffset = time % 16;
+
+    // Рисуем внешнюю чёрную линию
+    ctx.save();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.lineDashOffset = dashOffset;
+    ctx.strokeRect(bounds.x + 0.5, bounds.y + 0.5, bounds.width, bounds.height);
+
+    // Рисуем внутреннюю белую линию со смещением
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineDashOffset = dashOffset + 8;
+    ctx.strokeRect(bounds.x + 0.5, bounds.y + 0.5, bounds.width, bounds.height);
+    ctx.restore();
   }
 
   resize(width: number, height: number): void {

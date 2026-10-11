@@ -21,7 +21,7 @@ export interface Viewport {
 
 export interface Renderer {
   initialize(canvas: HTMLCanvasElement): void;
-  render(document: EditorDocument, viewport: Viewport): void;
+  render(document: EditorDocument, viewport: Viewport, selection?: any): void;
   resize(width: number, height: number): void;
   dispose(): void;
 }

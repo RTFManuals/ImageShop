@@ -42,10 +42,29 @@ export class LassoTool extends BaseTool {
     }
 
     const document = context.getDocument();
-    const selection = new Selection(document.width, document.height);
-    this.fillPolygon(selection, this.points);
+    const newSelection = new Selection(document.width, document.height);
+    this.fillPolygon(newSelection, this.points);
     
-    context.setSelection(selection);
+    // Apply selection modifiers
+    const existingSelection = context.getSelection();
+    let finalSelection: Selection;
+    
+    if (existingSelection && (event.shiftKey || event.altKey)) {
+      if (event.shiftKey && event.altKey) {
+        // Intersection
+        finalSelection = existingSelection.intersect(newSelection);
+      } else if (event.altKey) {
+        // Subtract
+        finalSelection = existingSelection.subtract(newSelection);
+      } else {
+        // Add (Union)
+        finalSelection = existingSelection.union(newSelection);
+      }
+    } else {
+      finalSelection = newSelection;
+    }
+    
+    context.setSelection(finalSelection);
     context.requestRender();
   }
 

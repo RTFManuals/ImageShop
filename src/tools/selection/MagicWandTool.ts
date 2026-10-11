@@ -39,10 +39,29 @@ export class MagicWandTool extends BaseTool {
     const targetA = activeLayer.imageData.data[idx + 3];
 
     // Flood fill selection
-    const selection = new Selection(document.width, document.height);
-    this.floodFill(selection, activeLayer.imageData, x, y, targetR, targetG, targetB, targetA);
+    const newSelection = new Selection(document.width, document.height);
+    this.floodFill(newSelection, activeLayer.imageData, x, y, targetR, targetG, targetB, targetA);
 
-    context.setSelection(selection);
+    // Apply selection modifiers
+    const existingSelection = context.getSelection();
+    let finalSelection: Selection;
+    
+    if (existingSelection && (event.shiftKey || event.altKey)) {
+      if (event.shiftKey && event.altKey) {
+        // Intersection
+        finalSelection = existingSelection.intersect(newSelection);
+      } else if (event.altKey) {
+        // Subtract
+        finalSelection = existingSelection.subtract(newSelection);
+      } else {
+        // Add (Union)
+        finalSelection = existingSelection.union(newSelection);
+      }
+    } else {
+      finalSelection = newSelection;
+    }
+
+    context.setSelection(finalSelection);
     context.requestRender();
   }
 

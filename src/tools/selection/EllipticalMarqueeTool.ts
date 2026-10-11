@@ -56,10 +56,29 @@ export class EllipticalMarqueeTool extends BaseTool {
       return;
     }
 
-    const selection = new Selection(document.width, document.height);
-    selection.selectEllipse({ x, y, width, height });
+    const newSelection = new Selection(document.width, document.height);
+    newSelection.selectEllipse({ x, y, width, height });
     
-    context.setSelection(selection);
+    // Apply selection modifiers
+    const existingSelection = context.getSelection();
+    let finalSelection: Selection;
+    
+    if (existingSelection && (event.shiftKey || event.altKey)) {
+      if (event.shiftKey && event.altKey) {
+        // Intersection
+        finalSelection = existingSelection.intersect(newSelection);
+      } else if (event.altKey) {
+        // Subtract
+        finalSelection = existingSelection.subtract(newSelection);
+      } else {
+        // Add (Union)
+        finalSelection = existingSelection.union(newSelection);
+      }
+    } else {
+      finalSelection = newSelection;
+    }
+    
+    context.setSelection(finalSelection);
     context.requestRender();
   }
 
