@@ -6,3 +6,4 @@ export * from './tools';
 export * from './selection';
 export * from './rendering';
 export * from './layers';
+export * from './image-processing';
