@@ -8,3 +8,5 @@ export { AddLayerCommand } from './commands/AddLayerCommand';
 export { RemoveLayerCommand } from './commands/RemoveLayerCommand';
 export { ChangeOpacityCommand } from './commands/ChangeOpacityCommand';
 export { MoveLayerCommand } from './commands/MoveLayerCommand';
+export { PaintStrokeCommand } from './commands/PaintStrokeCommand';
+export type { StrokePoint, StrokeData } from './commands/PaintStrokeCommand';

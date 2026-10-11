@@ -1,4 +1,5 @@
 import { BaseTool, EditorPointerEvent, ToolContext } from '../../core/tools/Tool';
+import { PaintStrokeCommand } from '../../core/commands/commands/PaintStrokeCommand';
 
 export interface StrokePoint {
   x: number;
@@ -100,8 +101,17 @@ export class EraserTool extends BaseTool {
       return;
     }
 
-    // TODO: Create EraseStrokeCommand and execute through unified pipeline
-    // For now, directly modify the layer (temporary solution)
+    // Create PaintStrokeCommand in eraser mode
+    const command = new PaintStrokeCommand(activeLayer.id, {
+      points: this.strokePoints,
+      color: '#000000', // Color doesn't matter for eraser
+      size: this.size,
+      opacity: this.opacity,
+      hardness: this.hardness,
+      mode: 'eraser',
+    });
+
+    context.executeCommand(command);
     
     this.strokePoints = [];
     context.requestRender();
