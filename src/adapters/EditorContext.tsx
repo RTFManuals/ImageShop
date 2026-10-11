@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback, useState } from 'react';
 import { Document } from '../core/document';
-import { HistoryManager } from '../core/commands';
-import { ToolRegistry, ToolManager, ToolContext } from '../core/tools';
+import { DocumentHistoryManager, DocumentCommand } from '../core/commands';
+import { ToolRegistry, ToolManager, ToolContext, ToolContextProvider } from '../core/tools';
 import { Selection } from '../core/selection';
 import { ViewportImpl } from '../core/rendering';
 import { MoveTool } from '../tools/move';
@@ -18,7 +18,7 @@ import { SpotHealingBrushTool, CloneStampTool } from '../tools/retouch';
 interface EditorContextValue {
   document: Document | null;
   setDocument: (doc: Document | null) => void;
-  historyManager: HistoryManager;
+  historyManager: DocumentHistoryManager;
   toolRegistry: ToolRegistry;
   toolManager: ToolManager;
   activeToolId: string;
@@ -28,6 +28,7 @@ interface EditorContextValue {
   viewport: ViewportImpl;
   zoom: number;
   setZoom: (zoom: number) => void;
+  executeCommand: (command: DocumentCommand) => void;
   undo: () => void;
   redo: () => void;
   renderTrigger: number;
@@ -45,16 +46,17 @@ export function useEditorContext(): EditorContextValue {
 
 interface EditorProviderProps {
   children: React.ReactNode;
+  initialDocument?: Document | null;
 }
 
-export function EditorProvider({ children }: EditorProviderProps) {
-  const [document, setDocumentState] = React.useState<Document | null>(null);
-  const [activeToolId, setActiveToolId] = React.useState<string>('move');
-  const [selection, setSelectionState] = React.useState<Selection | null>(null);
-  const [zoom, setZoom] = React.useState<number>(1);
-  const [renderTrigger, setRenderTrigger] = React.useState(0);
+export function EditorProvider({ children, initialDocument = null }: EditorProviderProps) {
+  const [document, setDocumentState] = useState<Document | null>(initialDocument);
+  const [activeToolId, setActiveToolId] = useState<string>('move');
+  const [selection, setSelectionState] = useState<Selection | null>(null);
+  const [zoom, setZoom] = useState<number>(1);
+  const [renderTrigger, setRenderTrigger] = useState(0);
 
-  const historyManagerRef = useRef(new HistoryManager(60));
+  const historyManagerRef = useRef(new DocumentHistoryManager(60));
   const toolRegistryRef = useRef(new ToolRegistry());
   const viewportRef = useRef(new ViewportImpl(800, 600));
   
@@ -97,6 +99,57 @@ export function EditorProvider({ children }: EditorProviderProps) {
     console.log('✅ Tools registered:', registry.getAll().map(t => t.id));
   }, []);
 
+  // Execute command through unified pipeline
+  const executeCommand = useCallback((command: DocumentCommand) => {
+    const currentDoc = documentRef.current;
+    if (!currentDoc) {
+      console.error('Cannot execute command: no document');
+      return;
+    }
+
+    try {
+      // Execute command through history manager
+      const newDocument = historyManagerRef.current.execute(command, currentDoc);
+      
+      // Update document state
+      setDocument(newDocument);
+      
+      // Trigger render
+      setRenderTrigger(prev => prev + 1);
+    } catch (error) {
+      console.error('Command execution failed:', error);
+      // Don't update state or trigger render on failure
+    }
+  }, [setDocument]);
+
+  // Undo last command
+  const undo = useCallback(() => {
+    const currentDoc = documentRef.current;
+    if (!currentDoc) {
+      return;
+    }
+
+    const previousDocument = historyManagerRef.current.undo(currentDoc);
+    if (previousDocument) {
+      setDocument(previousDocument);
+      setRenderTrigger(prev => prev + 1);
+    }
+  }, [setDocument]);
+
+  // Redo last undone command
+  const redo = useCallback(() => {
+    const currentDoc = documentRef.current;
+    if (!currentDoc) {
+      return;
+    }
+
+    const nextDocument = historyManagerRef.current.redo(currentDoc);
+    if (nextDocument) {
+      setDocument(nextDocument);
+      setRenderTrigger(prev => prev + 1);
+    }
+  }, [setDocument]);
+
   // Create tool context provider - returns fresh context on every call
   const getToolContext = useCallback((): ToolContext => {
     return {
@@ -110,17 +163,13 @@ export function EditorProvider({ children }: EditorProviderProps) {
       getSelection: () => selectionRef.current,
       setSelection: (sel) => setSelection(sel),
       getViewport: () => viewportRef.current,
-      executeCommand: (command) => {
-        historyManagerRef.current.execute(command);
-        // Trigger re-render after command execution
-        setRenderTrigger(prev => prev + 1);
-      },
+      executeCommand: (command: DocumentCommand) => executeCommand(command),
       requestRender: () => {
         // Trigger re-render for visual updates
         setRenderTrigger(prev => prev + 1);
       },
     };
-  }, [setDocument, setSelection]);
+  }, [setDocument, setSelection, executeCommand]);
 
   // Create ToolManager once with the context provider
   const toolManagerRef = useRef<ToolManager | null>(null);
@@ -136,20 +185,6 @@ export function EditorProvider({ children }: EditorProviderProps) {
     toolManagerRef.current?.setActiveTool(activeToolId);
   }, [activeToolId]);
 
-  const undo = useCallback(() => {
-    const command = historyManagerRef.current.undo();
-    if (command) {
-      setRenderTrigger(prev => prev + 1);
-    }
-  }, []);
-
-  const redo = useCallback(() => {
-    const command = historyManagerRef.current.redo();
-    if (command) {
-      setRenderTrigger(prev => prev + 1);
-    }
-  }, []);
-
   const value: EditorContextValue = {
     document,
     setDocument,
@@ -163,6 +198,7 @@ export function EditorProvider({ children }: EditorProviderProps) {
     viewport: viewportRef.current,
     zoom,
     setZoom,
+    executeCommand,
     undo,
     redo,
     renderTrigger,

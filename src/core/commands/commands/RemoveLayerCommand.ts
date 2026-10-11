@@ -1,35 +1,49 @@
-import { BaseCommand } from '../Command';
+import { BaseDocumentCommand } from '../DocumentCommand';
 import { Document } from '../../document/Document';
-import { Layer } from '../../document/DocumentTypes';
+import { Layer, RasterLayer } from '../../document/DocumentTypes';
 
-export class RemoveLayerCommand extends BaseCommand {
-  private document: Document;
+/**
+ * Command to remove a layer from the document
+ * Stores the removed layer for proper undo
+ */
+export class RemoveLayerCommand extends BaseDocumentCommand {
   private layerId: string;
   private removedLayer: Layer | null = null;
-  private resultDocument: Document | null = null;
+  private removedLayerIndex: number = -1;
+  private previousActiveLayerId: string | null = null;
 
-  constructor(document: Document, layerId: string) {
-    super('Remove Layer');
-    this.document = document;
+  constructor(layerId: string) {
+    super(`Remove Layer: ${layerId}`);
     this.layerId = layerId;
   }
 
-  execute(): void {
-    this.removedLayer = this.document.getLayer(this.layerId) || null;
-    this.resultDocument = this.document.removeLayer(this.layerId);
-  }
-
-  undo(): void {
-    if (this.removedLayer && this.resultDocument) {
-      this.resultDocument = this.resultDocument.addLayer(this.removedLayer);
+  execute(document: Document): Document {
+    // Store layer info for undo
+    const layer = document.getLayer(this.layerId);
+    if (!layer) {
+      throw new Error(`Layer with id "${this.layerId}" not found`);
     }
+    
+    this.removedLayer = layer;
+    this.removedLayerIndex = document.getLayerIndex(this.layerId);
+    this.previousActiveLayerId = document.activeLayerId;
+    
+    return document.removeLayer(this.layerId);
   }
 
-  getResult(): Document | null {
-    return this.resultDocument;
-  }
+  undo(document: Document): Document {
+    if (!this.removedLayer) {
+      throw new Error('Cannot undo: removed layer not stored');
+    }
 
-  getRemovedLayer(): Layer | null {
-    return this.removedLayer;
+    // Add the layer back
+    let newDocument = document.addLayer(this.removedLayer);
+    
+    // Restore active layer if it was the removed layer
+    if (this.previousActiveLayerId === this.layerId) {
+      newDocument = newDocument.setActiveLayer(this.layerId);
+    }
+    
+    return newDocument;
   }
 }

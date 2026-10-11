@@ -1,39 +1,37 @@
-import { BaseCommand } from '../Command';
+import { BaseDocumentCommand } from '../DocumentCommand';
 import { Document } from '../../document/Document';
 
-export class ChangeOpacityCommand extends BaseCommand {
-  private document: Document;
+/**
+ * Command to change layer opacity
+ */
+export class ChangeOpacityCommand extends BaseDocumentCommand {
   private layerId: string;
   private newOpacity: number;
-  private oldOpacity: number | null = null;
-  private resultDocument: Document | null = null;
+  private previousOpacity: number = -1;
 
-  constructor(document: Document, layerId: string, newOpacity: number) {
-    super('Change Opacity');
-    this.document = document;
+  constructor(layerId: string, newOpacity: number) {
+    super(`Change Opacity: ${layerId} to ${newOpacity}%`);
     this.layerId = layerId;
     this.newOpacity = Math.max(0, Math.min(100, newOpacity));
   }
 
-  execute(): void {
-    const layer = this.document.getLayer(this.layerId);
-    if (layer) {
-      this.oldOpacity = layer.opacity;
-      this.resultDocument = this.document.updateLayer(this.layerId, {
-        opacity: this.newOpacity,
-      });
+  execute(document: Document): Document {
+    const layer = document.getLayer(this.layerId);
+    if (!layer) {
+      throw new Error(`Layer with id "${this.layerId}" not found`);
     }
+    
+    // Store previous opacity for undo
+    this.previousOpacity = layer.opacity;
+    
+    return document.updateLayer(this.layerId, { opacity: this.newOpacity });
   }
 
-  undo(): void {
-    if (this.oldOpacity !== null && this.resultDocument) {
-      this.resultDocument = this.resultDocument.updateLayer(this.layerId, {
-        opacity: this.oldOpacity,
-      });
+  undo(document: Document): Document {
+    if (this.previousOpacity === -1) {
+      throw new Error('Cannot undo: previous opacity not stored');
     }
-  }
-
-  getResult(): Document | null {
-    return this.resultDocument;
+    
+    return document.updateLayer(this.layerId, { opacity: this.previousOpacity });
   }
 }

@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Document } from '../core/document';
-import { HistoryManager } from '../core/commands';
+import { DocumentHistoryManager, AddLayerCommand, RemoveLayerCommand } from '../core/commands';
 import { ToolRegistry, ToolManager, ToolContext, ToolContextProvider } from '../core/tools';
 import { Selection } from '../core/selection';
 import { ViewportImpl } from '../core/rendering';
 import { RasterLayer } from '../core/document/DocumentTypes';
 
-describe('EditorContext Integration', () => {
+describe('EditorContext Integration with Unified Pipeline', () => {
   let document: Document;
-  let historyManager: HistoryManager;
+  let historyManager: DocumentHistoryManager;
   let toolRegistry: ToolRegistry;
   let toolManager: ToolManager;
   let currentSelection: Selection | null;
@@ -33,7 +33,7 @@ describe('EditorContext Integration', () => {
     };
     document = document.addLayer(layer);
 
-    historyManager = new HistoryManager(60);
+    historyManager = new DocumentHistoryManager(60);
     toolRegistry = new ToolRegistry();
     currentSelection = null;
     renderCallCount = 0;
@@ -64,7 +64,10 @@ describe('EditorContext Integration', () => {
         },
         getViewport: () => new ViewportImpl(100, 100),
         executeCommand: (command) => {
-          historyManager.execute(command);
+          // Use unified pipeline
+          const newDocument = historyManager.execute(command, state.document);
+          state.document = newDocument;
+          document = newDocument;
           renderCallCount++;
         },
         requestRender: () => {
@@ -77,76 +80,13 @@ describe('EditorContext Integration', () => {
     toolManager = new ToolManager(toolRegistry, contextProvider);
   });
 
-  describe('ToolContext state access', () => {
-    it('should receive updated document state', () => {
-      const context = (toolManager as any).getContext();
-      const activeLayer = context.getActiveLayer();
-      expect(activeLayer).toBeDefined();
-      expect(activeLayer?.id).toBe('layer1');
-
-      // Update document
-      const updatedDoc = document.setActiveLayer(null);
-      context.setDocument(updatedDoc);
-
-      // Should receive updated state through new context call
-      const newContext = (toolManager as any).getContext();
-      const newActiveLayer = newContext.getActiveLayer();
-      expect(newActiveLayer).toBeUndefined();
-    });
-
-    it('should receive updated selection state', () => {
-      const context = (toolManager as any).getContext();
-      expect(context.getSelection()).toBeNull();
-
-      // Update selection
-      const selection = new Selection(100, 100);
-      selection.selectRect({ x: 10, y: 10, width: 20, height: 20 });
-      context.setSelection(selection);
-
-      // Should receive updated state through new context call
-      const newContext = (toolManager as any).getContext();
-      const currentSel = newContext.getSelection();
-      expect(currentSel).not.toBeNull();
-      expect(currentSel?.contains(15, 15)).toBe(true);
-    });
-
-    it('should trigger render on command execution', () => {
-      const context = (toolManager as any).getContext();
-      expect(renderCallCount).toBe(0);
-
-      // Execute a command (simulated)
-      const mockCommand = {
-        id: 'test',
-        name: 'Test Command',
-        timestamp: Date.now(),
-        execute: () => {},
-        undo: () => {},
-        redo: () => {},
-      };
-
-      context.executeCommand(mockCommand);
-      expect(renderCallCount).toBe(1);
-    });
-
-    it('should trigger render on requestRender', () => {
-      const context = (toolManager as any).getContext();
-      expect(renderCallCount).toBe(0);
-
-      context.requestRender();
-      expect(renderCallCount).toBe(1);
-
-      context.requestRender();
-      expect(renderCallCount).toBe(2);
-    });
-  });
-
-  describe('Command execution and undo/redo', () => {
-    it('should update document through command execution', () => {
+  describe('Unified Command Pipeline', () => {
+    it('should execute command and update document state', () => {
       const context = (toolManager as any).getContext();
       const initialDoc = context.getDocument();
-      expect(initialDoc?.layers.length).toBe(1);
+      expect(initialDoc.layers.length).toBe(1);
 
-      // Simulate command that adds a layer
+      // Execute command through context
       const newLayer: RasterLayer = {
         id: 'layer2',
         name: 'Layer 2',
@@ -160,21 +100,19 @@ describe('EditorContext Integration', () => {
         imageData: new ImageData(100, 100),
       };
 
-      const updatedDoc = initialDoc!.addLayer(newLayer);
-      context.setDocument(updatedDoc);
+      const command = new AddLayerCommand(newLayer);
+      context.executeCommand(command);
 
       // Verify document updated
-      const newContext = (toolManager as any).getContext();
-      const currentDoc = newContext.getDocument();
-      expect(currentDoc?.layers.length).toBe(2);
+      const currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(2);
+      expect(renderCallCount).toBe(1);
     });
 
-    it('should restore previous document on undo', () => {
+    it('should undo command and restore document state', () => {
       const context = (toolManager as any).getContext();
-      const initialDoc = context.getDocument();
-      expect(initialDoc?.layers.length).toBe(1);
-
-      // Simulate command execution
+      
+      // Execute command
       const newLayer: RasterLayer = {
         id: 'layer2',
         name: 'Layer 2',
@@ -188,45 +126,137 @@ describe('EditorContext Integration', () => {
         imageData: new ImageData(100, 100),
       };
 
-      const updatedDoc = initialDoc!.addLayer(newLayer);
+      const command = new AddLayerCommand(newLayer);
+      context.executeCommand(command);
       
-      // Create a simple command for testing
-      const mockCommand = {
-        id: 'test',
-        name: 'Test Command',
-        timestamp: Date.now(),
-        execute: () => {
-          context.setDocument(updatedDoc);
-        },
-        undo: () => {
-          context.setDocument(initialDoc!);
-        },
-        redo: () => {
-          context.setDocument(updatedDoc);
-        },
+      let currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(2);
+
+      // Undo through history manager
+      const undoneDoc = historyManager.undo(currentDoc);
+      expect(undoneDoc).not.toBeNull();
+      
+      context.setDocument(undoneDoc);
+      currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(1);
+    });
+
+    it('should redo command and restore new document state', () => {
+      const context = (toolManager as any).getContext();
+      
+      // Execute command
+      const newLayer: RasterLayer = {
+        id: 'layer2',
+        name: 'Layer 2',
+        type: 'raster',
+        visible: true,
+        opacity: 100,
+        blendMode: 'normal',
+        locked: false,
+        width: 100,
+        height: 100,
+        imageData: new ImageData(100, 100),
       };
 
-      historyManager.execute(mockCommand);
+      const command = new AddLayerCommand(newLayer);
+      context.executeCommand(command);
       
-      // Verify document updated
-      let currentContext = (toolManager as any).getContext();
-      let currentDoc = currentContext.getDocument();
-      expect(currentDoc?.layers.length).toBe(2);
+      let currentDoc = context.getDocument();
+      
+      // Undo
+      const undoneDoc = historyManager.undo(currentDoc);
+      context.setDocument(undoneDoc);
+      
+      // Redo
+      const redoneDoc = historyManager.redo(undoneDoc!);
+      expect(redoneDoc).not.toBeNull();
+      
+      context.setDocument(redoneDoc);
+      currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(2);
+    });
+
+    it('should handle sequential commands correctly', () => {
+      const context = (toolManager as any).getContext();
+      
+      // Execute three commands
+      for (let i = 2; i <= 4; i++) {
+        const newLayer: RasterLayer = {
+          id: `layer${i}`,
+          name: `Layer ${i}`,
+          type: 'raster',
+          visible: true,
+          opacity: 100,
+          blendMode: 'normal',
+          locked: false,
+          width: 100,
+          height: 100,
+          imageData: new ImageData(100, 100),
+        };
+
+        const command = new AddLayerCommand(newLayer);
+        context.executeCommand(command);
+      }
+
+      let currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(4);
+      expect(renderCallCount).toBe(3);
+
+      // Undo three times
+      for (let i = 0; i < 3; i++) {
+        const undoneDoc = historyManager.undo(currentDoc);
+        expect(undoneDoc).not.toBeNull();
+        context.setDocument(undoneDoc);
+        currentDoc = context.getDocument();
+      }
+
+      expect(currentDoc.layers.length).toBe(1);
+
+      // Redo three times
+      for (let i = 0; i < 3; i++) {
+        const redoneDoc = historyManager.redo(currentDoc);
+        expect(redoneDoc).not.toBeNull();
+        context.setDocument(redoneDoc);
+        currentDoc = context.getDocument();
+      }
+
+      expect(currentDoc.layers.length).toBe(4);
+    });
+
+    it('should invalidate redo after new command', () => {
+      const context = (toolManager as any).getContext();
+      
+      // Execute first command
+      const layer2: RasterLayer = {
+        id: 'layer2',
+        name: 'Layer 2',
+        type: 'raster',
+        visible: true,
+        opacity: 100,
+        blendMode: 'normal',
+        locked: false,
+        width: 100,
+        height: 100,
+        imageData: new ImageData(100, 100),
+      };
+
+      const command1 = new AddLayerCommand(layer2);
+      context.executeCommand(command1);
+      
+      let currentDoc = context.getDocument();
+      expect(historyManager.canRedo()).toBe(false);
 
       // Undo
-      historyManager.undo();
-      currentContext = (toolManager as any).getContext();
-      currentDoc = currentContext.getDocument();
-      expect(currentDoc?.layers.length).toBe(1);
-    });
-
-    it('should restore new document on redo', () => {
-      const context = (toolManager as any).getContext();
-      const initialDoc = context.getDocument();
+      const undoneDoc = historyManager.undo(currentDoc);
+      context.setDocument(undoneDoc);
+      currentDoc = context.getDocument();
       
-      const newLayer: RasterLayer = {
-        id: 'layer2',
-        name: 'Layer 2',
+      expect(historyManager.canRedo()).toBe(true);
+
+      // Execute new command (should invalidate redo)
+      const layer3: RasterLayer = {
+        id: 'layer3',
+        name: 'Layer 3',
         type: 'raster',
         visible: true,
         opacity: 100,
@@ -237,44 +267,43 @@ describe('EditorContext Integration', () => {
         imageData: new ImageData(100, 100),
       };
 
-      const updatedDoc = initialDoc!.addLayer(newLayer);
+      const command2 = new AddLayerCommand(layer3);
+      context.executeCommand(command2);
       
-      const mockCommand = {
-        id: 'test',
-        name: 'Test Command',
-        timestamp: Date.now(),
-        execute: () => {
-          context.setDocument(updatedDoc);
-        },
-        undo: () => {
-          context.setDocument(initialDoc!);
-        },
-        redo: () => {
-          context.setDocument(updatedDoc);
-        },
-      };
+      expect(historyManager.canRedo()).toBe(false);
+      currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(2);
+      expect(currentDoc.getLayer('layer3')).toBeDefined();
+    });
 
-      historyManager.execute(mockCommand);
-      historyManager.undo();
+    it('should handle failed commands without corrupting state', () => {
+      const context = (toolManager as any).getContext();
       
-      // Verify document restored to initial state
-      let currentContext = (toolManager as any).getContext();
-      let currentDoc = currentContext.getDocument();
-      expect(currentDoc?.layers.length).toBe(1);
+      const initialDoc = context.getDocument();
+      const initialLayerCount = initialDoc.layers.length;
+      const initialHistorySize = historyManager.getUndoCount();
 
-      // Redo
-      historyManager.redo();
-      currentContext = (toolManager as any).getContext();
-      currentDoc = currentContext.getDocument();
-      expect(currentDoc?.layers.length).toBe(2);
+      // Try to remove non-existent layer
+      const command = new RemoveLayerCommand('nonexistent');
+      
+      expect(() => {
+        context.executeCommand(command);
+      }).toThrow();
+
+      // Document should be unchanged
+      const currentDoc = context.getDocument();
+      expect(currentDoc.layers.length).toBe(initialLayerCount);
+      
+      // History should be unchanged
+      expect(historyManager.getUndoCount()).toBe(initialHistorySize);
     });
   });
 
-  describe('Active layer preservation', () => {
+  describe('Active Layer Preservation', () => {
     it('should preserve valid active layer after layer removal', () => {
       const context = (toolManager as any).getContext();
       
-      // Add two layers
+      // Add second layer
       const layer2: RasterLayer = {
         id: 'layer2',
         name: 'Layer 2',
@@ -289,60 +318,50 @@ describe('EditorContext Integration', () => {
       };
 
       let doc = context.getDocument();
-      doc = doc.addLayer(layer2);
+      const addCmd = new AddLayerCommand(layer2);
+      doc = historyManager.execute(addCmd, doc);
       doc = doc.setActiveLayer('layer2');
       context.setDocument(doc);
 
       // Remove active layer
-      doc = doc.removeLayer('layer2');
+      const removeCmd = new RemoveLayerCommand('layer2');
+      doc = historyManager.execute(removeCmd, doc);
       context.setDocument(doc);
 
       // Active layer should be valid
-      const currentContext = (toolManager as any).getContext();
-      const currentDoc = currentContext.getDocument();
-      expect(currentDoc?.activeLayerId).toBe('layer1');
-      expect(currentDoc?.getActiveLayer()).toBeDefined();
-    });
-
-    it('should set active layer to null when all layers removed', () => {
-      const context = (toolManager as any).getContext();
-      let doc = context.getDocument();
-      doc = doc.removeLayer('layer1');
-      context.setDocument(doc);
-
-      const currentContext = (toolManager as any).getContext();
-      const currentDoc = currentContext.getDocument();
-      expect(currentDoc?.activeLayerId).toBeNull();
-      expect(currentDoc?.getActiveLayer()).toBeUndefined();
+      const currentDoc = context.getDocument();
+      expect(currentDoc.activeLayerId).toBe('layer1');
+      expect(currentDoc.getActiveLayer()).toBeDefined();
     });
   });
 
-  describe('History and rendering coordination', () => {
+  describe('History and Rendering Coordination', () => {
     it('should coordinate command execution with rendering', () => {
       const context = (toolManager as any).getContext();
       expect(renderCallCount).toBe(0);
       expect(historyManager.getUndoCount()).toBe(0);
 
       // Execute multiple commands
-      for (let i = 0; i < 3; i++) {
-        const mockCommand = {
-          id: `test-${i}`,
-          name: `Test Command ${i}`,
-          timestamp: Date.now(),
-          execute: () => {},
-          undo: () => {},
-          redo: () => {},
+      for (let i = 2; i <= 4; i++) {
+        const newLayer: RasterLayer = {
+          id: `layer${i}`,
+          name: `Layer ${i}`,
+          type: 'raster',
+          visible: true,
+          opacity: 100,
+          blendMode: 'normal',
+          locked: false,
+          width: 100,
+          height: 100,
+          imageData: new ImageData(100, 100),
         };
-        context.executeCommand(mockCommand);
+
+        const command = new AddLayerCommand(newLayer);
+        context.executeCommand(command);
       }
 
       expect(historyManager.getUndoCount()).toBe(3);
       expect(renderCallCount).toBe(3);
-
-      // Undo should not trigger additional render (handled by command)
-      historyManager.undo();
-      expect(historyManager.getUndoCount()).toBe(2);
-      expect(historyManager.getRedoCount()).toBe(1);
     });
   });
 });

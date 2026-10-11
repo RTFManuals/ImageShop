@@ -1,27 +1,23 @@
-import { BaseCommand } from '../Command';
+import { BaseDocumentCommand } from '../DocumentCommand';
 import { Document } from '../../document/Document';
 import { Layer } from '../../document/DocumentTypes';
 
-export class AddLayerCommand extends BaseCommand {
-  private document: Document;
+/**
+ * Command to add a layer to the document
+ */
+export class AddLayerCommand extends BaseDocumentCommand {
   private layer: Layer;
-  private resultDocument: Document | null = null;
 
-  constructor(document: Document, layer: Layer) {
-    super('Add Layer');
-    this.document = document;
+  constructor(layer: Layer) {
+    super(`Add Layer: ${layer.name}`);
     this.layer = layer;
   }
 
-  execute(): void {
-    this.resultDocument = this.document.addLayer(this.layer);
+  execute(document: Document): Document {
+    return document.addLayer(this.layer);
   }
 
-  undo(): void {
-    this.resultDocument = this.document.removeLayer(this.layer.id);
-  }
-
-  getResult(): Document | null {
-    return this.resultDocument;
+  undo(document: Document): Document {
+    return document.removeLayer(this.layer.id);
   }
 }

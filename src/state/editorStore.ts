@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Document } from '../core/document';
-import { HistoryManager } from '../core/commands';
+import { DocumentHistoryManager, DocumentCommand } from '../core/commands';
 import { ToolRegistry, ToolManager } from '../core/tools';
 import { Selection } from '../core/selection';
 import { ViewportImpl } from '../core/rendering';
@@ -11,7 +11,7 @@ interface EditorState {
   setDocument: (doc: Document | null) => void;
   
   // History
-  historyManager: HistoryManager;
+  historyManager: DocumentHistoryManager;
   
   // Tools
   toolRegistry: ToolRegistry;
@@ -30,6 +30,7 @@ interface EditorState {
   setZoom: (zoom: number) => void;
   
   // Actions
+  executeCommand: (command: DocumentCommand) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -40,7 +41,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setDocument: (doc) => set({ document: doc }),
   
   // History
-  historyManager: new HistoryManager(60),
+  historyManager: new DocumentHistoryManager(60),
   
   // Tools
   toolRegistry: new ToolRegistry(),
@@ -62,11 +63,42 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   
   // Actions
+  executeCommand: (command) => {
+    const { document, historyManager } = get();
+    if (!document) {
+      console.error('Cannot execute command: no document');
+      return;
+    }
+
+    try {
+      const newDocument = historyManager.execute(command, document);
+      set({ document: newDocument });
+    } catch (error) {
+      console.error('Command execution failed:', error);
+    }
+  },
+  
   undo: () => {
-    get().historyManager.undo();
+    const { document, historyManager } = get();
+    if (!document) {
+      return;
+    }
+
+    const previousDocument = historyManager.undo(document);
+    if (previousDocument) {
+      set({ document: previousDocument });
+    }
   },
   
   redo: () => {
-    get().historyManager.redo();
+    const { document, historyManager } = get();
+    if (!document) {
+      return;
+    }
+
+    const nextDocument = historyManager.redo(document);
+    if (nextDocument) {
+      set({ document: nextDocument });
+    }
   },
 }));
