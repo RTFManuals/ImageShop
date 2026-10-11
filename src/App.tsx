@@ -834,7 +834,8 @@ export default function App() {
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setContextMenu(null);
-    if (e.button === 1 || (e.button === 0 && e.altKey) || tool === 'hand') {
+    // Allow Alt+click for zoom tool, but use Alt+drag for panning with other tools
+    if (e.button === 1 || (e.button === 0 && e.altKey && tool !== 'zoom') || tool === 'hand') {
       isPanning.current = true;
       panStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
       return;
