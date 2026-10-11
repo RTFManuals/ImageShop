@@ -49,23 +49,66 @@ export class Document {
   }
 
   addLayer(layer: Layer): Document {
-    return new Document({
+    // Validate layer ID uniqueness
+    if (this._document.layers.some(l => l.id === layer.id)) {
+      throw new Error(`Layer with id "${layer.id}" already exists`);
+    }
+    
+    // Validate layer ID is not empty
+    if (!layer.id || layer.id.trim() === '') {
+      throw new Error('Layer ID cannot be empty');
+    }
+
+    const newDocument: EditorDocument = {
       ...this._document,
       layers: [...this._document.layers, layer],
       metadata: {
         ...this._document.metadata,
         modifiedAt: new Date().toISOString(),
       },
-    });
+    };
+
+    // If this is the first layer, set it as active
+    if (newDocument.layers.length === 1) {
+      newDocument.activeLayerId = layer.id;
+    }
+
+    return new Document(newDocument);
   }
 
   removeLayer(layerId: string): Document {
+    // Validate layer exists
+    const layerIndex = this._document.layers.findIndex(l => l.id === layerId);
+    if (layerIndex === -1) {
+      throw new Error(`Layer with id "${layerId}" not found`);
+    }
+
+    const remainingLayers = this._document.layers.filter(l => l.id !== layerId);
+    
+    // Determine new active layer
+    let newActiveLayerId = this._document.activeLayerId;
+    if (this._document.activeLayerId === layerId) {
+      // If removing active layer, select adjacent layer or first available
+      if (remainingLayers.length === 0) {
+        newActiveLayerId = null;
+      } else if (layerIndex > 0) {
+        // Select previous layer
+        newActiveLayerId = remainingLayers[layerIndex - 1].id;
+      } else {
+        // Select first layer
+        newActiveLayerId = remainingLayers[0].id;
+      }
+    }
+
+    // Validate active layer still exists
+    if (newActiveLayerId && !remainingLayers.some(l => l.id === newActiveLayerId)) {
+      newActiveLayerId = remainingLayers.length > 0 ? remainingLayers[0].id : null;
+    }
+
     return new Document({
       ...this._document,
-      layers: this._document.layers.filter(l => l.id !== layerId),
-      activeLayerId: this._document.activeLayerId === layerId 
-        ? (this._document.layers[0]?.id || null)
-        : this._document.activeLayerId,
+      layers: remainingLayers,
+      activeLayerId: newActiveLayerId,
       metadata: {
         ...this._document.metadata,
         modifiedAt: new Date().toISOString(),
@@ -87,7 +130,26 @@ export class Document {
   }
 
   reorderLayers(layerIds: string[]): Document {
+    // Validate all layer IDs exist
     const layerMap = new Map(this._document.layers.map(l => [l.id, l]));
+    
+    for (const id of layerIds) {
+      if (!layerMap.has(id)) {
+        throw new Error(`Layer with id "${id}" not found`);
+      }
+    }
+
+    // Validate no layers are lost
+    if (layerIds.length !== this._document.layers.length) {
+      throw new Error(`Reorder must include all layers. Expected ${this._document.layers.length}, got ${layerIds.length}`);
+    }
+
+    // Validate no duplicates
+    const uniqueIds = new Set(layerIds);
+    if (uniqueIds.size !== layerIds.length) {
+      throw new Error('Reorder contains duplicate layer IDs');
+    }
+
     const reorderedLayers = layerIds
       .map(id => layerMap.get(id))
       .filter((l): l is Layer => l !== undefined);
@@ -103,6 +165,11 @@ export class Document {
   }
 
   setActiveLayer(layerId: string | null): Document {
+    // Validate layer exists if not null
+    if (layerId !== null && !this._document.layers.some(l => l.id === layerId)) {
+      throw new Error(`Layer with id "${layerId}" not found`);
+    }
+
     return new Document({
       ...this._document,
       activeLayerId: layerId,
@@ -122,6 +189,29 @@ export class Document {
     return this._document.layers.findIndex(l => l.id === layerId);
   }
 
+  resize(width: number, height: number): Document {
+    // Validate dimensions
+    if (width <= 0 || height <= 0) {
+      throw new Error('Document dimensions must be positive');
+    }
+    if (!Number.isInteger(width) || !Number.isInteger(height)) {
+      throw new Error('Document dimensions must be integers');
+    }
+    if (width > 100000 || height > 100000) {
+      throw new Error('Document dimensions too large (max 100000x100000)');
+    }
+
+    return new Document({
+      ...this._document,
+      width,
+      height,
+      metadata: {
+        ...this._document.metadata,
+        modifiedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   // Serialization
   toJSON(): EditorDocument {
     return { ...this._document };
@@ -133,6 +223,17 @@ export class Document {
 
   // Factory methods
   static create(width: number, height: number, name: string = 'Untitled'): Document {
+    // Validate dimensions
+    if (width <= 0 || height <= 0) {
+      throw new Error('Document dimensions must be positive');
+    }
+    if (!Number.isInteger(width) || !Number.isInteger(height)) {
+      throw new Error('Document dimensions must be integers');
+    }
+    if (width > 100000 || height > 100000) {
+      throw new Error('Document dimensions too large (max 100000x100000)');
+    }
+
     const id = crypto.randomUUID();
     const metadata: DocumentMetadata = {
       id,

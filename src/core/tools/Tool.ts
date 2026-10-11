@@ -25,6 +25,7 @@ export interface EditorKeyboardEvent {
   metaKey: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface ToolContext {
   // Document access
   getDocument(): any;

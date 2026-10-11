@@ -49,6 +49,16 @@ export class DocumentAdapter {
       }
     }
 
+    // Note: Legacy Layer has clippingMask and groupId fields
+    // These are not yet supported in core Layer model
+    // TODO: Add clippingMask and groupId to core Layer when implementing layer groups
+    if (legacyLayer.clippingMask !== undefined) {
+      console.warn('clippingMask field not yet supported in core Layer model');
+    }
+    if (legacyLayer.groupId !== undefined) {
+      console.warn('groupId field not yet supported in core Layer model');
+    }
+
     return coreLayer;
   }
 

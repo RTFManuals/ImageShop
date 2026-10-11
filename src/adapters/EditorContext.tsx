@@ -30,6 +30,7 @@ interface EditorContextValue {
   setZoom: (zoom: number) => void;
   undo: () => void;
   redo: () => void;
+  renderTrigger: number;
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null);
@@ -51,10 +52,24 @@ export function EditorProvider({ children }: EditorProviderProps) {
   const [activeToolId, setActiveToolId] = React.useState<string>('move');
   const [selection, setSelection] = React.useState<Selection | null>(null);
   const [zoom, setZoom] = React.useState<number>(1);
+  const [renderTrigger, setRenderTrigger] = React.useState(0);
 
   const historyManagerRef = useRef(new HistoryManager(60));
   const toolRegistryRef = useRef(new ToolRegistry());
   const viewportRef = useRef(new ViewportImpl(800, 600));
+  
+  // Use refs to avoid stale closures in ToolContext
+  const documentRef = useRef(document);
+  const selectionRef = useRef(selection);
+  
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    documentRef.current = document;
+  }, [document]);
+  
+  React.useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
 
   // Initialize tools
   useEffect(() => {
@@ -76,22 +91,26 @@ export function EditorProvider({ children }: EditorProviderProps) {
     console.log('✅ Tools registered:', registry.getAll().map(t => t.id));
   }, []);
 
-  // Create tool context
+  // Create tool context with refs to avoid stale closures
   const toolContext: ToolContext = {
-    getDocument: () => document,
+    getDocument: () => documentRef.current,
     setDocument: (doc) => setDocument(doc),
     getActiveLayer: () => {
-      if (!document) return null;
-      return document.getActiveLayer();
+      const doc = documentRef.current;
+      if (!doc) return null;
+      return doc.getActiveLayer();
     },
-    getSelection: () => selection,
+    getSelection: () => selectionRef.current,
     setSelection: (sel) => setSelection(sel),
     getViewport: () => viewportRef.current,
     executeCommand: (command) => {
       historyManagerRef.current.execute(command);
+      // Trigger re-render after command execution
+      setRenderTrigger(prev => prev + 1);
     },
     requestRender: () => {
-      // Will be implemented by consumer
+      // Trigger re-render for visual updates
+      setRenderTrigger(prev => prev + 1);
     },
   };
 
@@ -125,6 +144,7 @@ export function EditorProvider({ children }: EditorProviderProps) {
     setZoom,
     undo,
     redo,
+    renderTrigger,
   };
 
   return (
